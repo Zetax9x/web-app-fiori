@@ -1,20 +1,35 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from database import get_db
+import psycopg2.extras
 
 api = Blueprint('api', __name__)
 
-
-def row_to_dict(row):
-    return dict(row) if row else None
-
-
-def rows_to_list(rows):
-    return [dict(row) for row in rows]
+TIPI_VALIDI = {'Cuscino', 'Cuscino Grande', 'Cuore', 'Cuore Grande', 'Copricassa', 'Mazzo di fiori', 'Altro'}
 
 
 def now_iso():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def query(sql, params=(), fetchone=False, fetchall=False, returning=False):
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute(sql, params)
+    result = None
+    if fetchone or returning:
+        result = cursor.fetchone()
+    elif fetchall:
+        result = cursor.fetchall()
+    conn.commit()
+    cursor.close()
+    conn.close()
+    if result is None:
+        return None
+    # Convert RealDictRow to plain dict
+    if isinstance(result, list):
+        return [dict(r) for r in result]
+    return dict(result)
 
 
 # --- Defunti ---
@@ -22,21 +37,21 @@ def now_iso():
 @api.route('/api/defunti', methods=['GET'])
 def get_defunti():
     search = request.args.get('search', '').strip()
-    conn = get_db()
     if search:
-        rows = conn.execute(
+        pattern = f'%{search}%'
+        rows = query(
             '''SELECT * FROM defunti
                WHERE archiviato = 0
-                 AND (nome LIKE ? OR cognome LIKE ? OR luogo LIKE ?)
+                 AND (nome ILIKE %s OR cognome ILIKE %s OR luogo ILIKE %s)
                ORDER BY data_inserimento DESC''',
-            (f'%{search}%', f'%{search}%', f'%{search}%')
-        ).fetchall()
+            (pattern, pattern, pattern), fetchall=True
+        )
     else:
-        rows = conn.execute(
-            'SELECT * FROM defunti WHERE archiviato = 0 ORDER BY data_inserimento DESC'
-        ).fetchall()
-    conn.close()
-    return jsonify(rows_to_list(rows))
+        rows = query(
+            'SELECT * FROM defunti WHERE archiviato = 0 ORDER BY data_inserimento DESC',
+            fetchall=True
+        )
+    return jsonify(rows)
 
 
 @api.route('/api/defunti', methods=['POST'])
@@ -45,81 +60,57 @@ def create_defunto():
     if not data or not data.get('nome') or not data.get('cognome'):
         return jsonify({'error': 'nome e cognome sono obbligatori'}), 400
 
-    conn = get_db()
-    cursor = conn.execute(
+    row = query(
         '''INSERT INTO defunti (nome, cognome, data_decesso, luogo, note, data_inserimento, archiviato)
-           VALUES (?, ?, ?, ?, ?, ?, 0)''',
-        (
-            data['nome'],
-            data['cognome'],
-            data.get('data_decesso'),
-            data.get('luogo'),
-            data.get('note'),
-            now_iso(),
-        )
+           VALUES (%s, %s, %s, %s, %s, %s, 0) RETURNING *''',
+        (data['nome'], data['cognome'], data.get('data_decesso'),
+         data.get('luogo'), data.get('note'), now_iso()),
+        returning=True
     )
-    conn.commit()
-    new_id = cursor.lastrowid
-    row = conn.execute('SELECT * FROM defunti WHERE id = ?', (new_id,)).fetchone()
-    conn.close()
-    return jsonify(row_to_dict(row)), 201
+    return jsonify(row), 201
 
 
 @api.route('/api/defunti/<int:defunto_id>', methods=['GET'])
 def get_defunto(defunto_id):
-    conn = get_db()
-    defunto = conn.execute('SELECT * FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
-    fiori = conn.execute(
-        'SELECT * FROM fiori WHERE defunto_id = ? ORDER BY data_inserimento DESC',
-        (defunto_id,)
-    ).fetchall()
-    conn.close()
-    result = row_to_dict(defunto)
-    result['fiori'] = rows_to_list(fiori)
-    return jsonify(result)
+    fiori = query(
+        'SELECT * FROM fiori WHERE defunto_id = %s ORDER BY data_inserimento DESC',
+        (defunto_id,), fetchall=True
+    )
+    defunto['fiori'] = fiori
+    return jsonify(defunto)
 
 
 @api.route('/api/defunti/<int:defunto_id>', methods=['PUT'])
 def update_defunto(defunto_id):
     data = request.get_json()
-    conn = get_db()
-    defunto = conn.execute('SELECT * FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
 
-    conn.execute(
+    updated = query(
         '''UPDATE defunti
-           SET nome = ?, cognome = ?, data_decesso = ?, luogo = ?, note = ?
-           WHERE id = ?''',
-        (
-            data.get('nome', defunto['nome']),
-            data.get('cognome', defunto['cognome']),
-            data.get('data_decesso', defunto['data_decesso']),
-            data.get('luogo', defunto['luogo']),
-            data.get('note', defunto['note']),
-            defunto_id,
-        )
+           SET nome = %s, cognome = %s, data_decesso = %s, luogo = %s, note = %s
+           WHERE id = %s RETURNING *''',
+        (data.get('nome', defunto['nome']),
+         data.get('cognome', defunto['cognome']),
+         data.get('data_decesso', defunto['data_decesso']),
+         data.get('luogo', defunto['luogo']),
+         data.get('note', defunto['note']),
+         defunto_id),
+        returning=True
     )
-    conn.commit()
-    updated = conn.execute('SELECT * FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
-    conn.close()
-    return jsonify(row_to_dict(updated))
+    return jsonify(updated)
 
 
 @api.route('/api/defunti/<int:defunto_id>', methods=['DELETE'])
 def archive_defunto(defunto_id):
-    conn = get_db()
-    defunto = conn.execute('SELECT * FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
-    conn.execute('UPDATE defunti SET archiviato = 1 WHERE id = ?', (defunto_id,))
-    conn.commit()
-    conn.close()
+    query('UPDATE defunti SET archiviato = 1 WHERE id = %s', (defunto_id,))
     return jsonify({'message': 'Defunto archiviato'})
 
 
@@ -127,53 +118,38 @@ def archive_defunto(defunto_id):
 
 @api.route('/api/defunti/<int:defunto_id>/fiori', methods=['GET'])
 def get_fiori(defunto_id):
-    conn = get_db()
-    defunto = conn.execute('SELECT id FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT id FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
-    rows = conn.execute(
-        'SELECT * FROM fiori WHERE defunto_id = ? ORDER BY data_inserimento DESC',
-        (defunto_id,)
-    ).fetchall()
-    conn.close()
-    return jsonify(rows_to_list(rows))
+    rows = query(
+        'SELECT * FROM fiori WHERE defunto_id = %s ORDER BY data_inserimento DESC',
+        (defunto_id,), fetchall=True
+    )
+    return jsonify(rows)
 
 
 @api.route('/api/defunti/<int:defunto_id>/fiori', methods=['POST'])
 def add_fiore(defunto_id):
     data = request.get_json()
-    if not data or not data.get('tipo') or data.get('costo') is None:
-        return jsonify({'error': 'tipo e costo sono obbligatori'}), 400
+    if not data or not data.get('tipo'):
+        return jsonify({'error': 'tipo e\' obbligatorio'}), 400
 
-    tipi_validi = {'Copricassa', 'Cuscino', 'Mazzo', 'Corona', 'Composizione', 'Altro'}
-    if data['tipo'] not in tipi_validi:
-        return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(tipi_validi))}'}), 400
+    if data['tipo'] not in TIPI_VALIDI:
+        return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(TIPI_VALIDI))}'}), 400
 
-    conn = get_db()
-    defunto = conn.execute('SELECT id FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT id FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
 
-    cursor = conn.execute(
-        '''INSERT INTO fiori (defunto_id, tipo, descrizione, costo, pagato, pagato_da, data_inserimento)
-           VALUES (?, ?, ?, ?, ?, ?, ?)''',
-        (
-            defunto_id,
-            data['tipo'],
-            data.get('descrizione'),
-            float(data['costo']),
-            int(data.get('pagato', 0)),
-            data.get('pagato_da'),
-            now_iso(),
-        )
+    row = query(
+        '''INSERT INTO fiori (defunto_id, tipo, descrizione, scritta_fascia, costo, pagato, pagato_da, data_inserimento)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *''',
+        (defunto_id, data['tipo'], data.get('descrizione'), data.get('scritta_fascia'),
+         float(data.get('costo', 0)), int(data.get('pagato', 0)),
+         data.get('pagato_da'), now_iso()),
+        returning=True
     )
-    conn.commit()
-    new_id = cursor.lastrowid
-    row = conn.execute('SELECT * FROM fiori WHERE id = ?', (new_id,)).fetchone()
-    conn.close()
-    return jsonify(row_to_dict(row)), 201
+    return jsonify(row), 201
 
 
 # --- Fiori singolo ---
@@ -181,47 +157,36 @@ def add_fiore(defunto_id):
 @api.route('/api/fiori/<int:fiore_id>', methods=['PUT'])
 def update_fiore(fiore_id):
     data = request.get_json()
-    conn = get_db()
-    fiore = conn.execute('SELECT * FROM fiori WHERE id = ?', (fiore_id,)).fetchone()
+    fiore = query('SELECT * FROM fiori WHERE id = %s', (fiore_id,), fetchone=True)
     if not fiore:
-        conn.close()
         return jsonify({'error': 'Fiore non trovato'}), 404
 
-    tipi_validi = {'Copricassa', 'Cuscino', 'Mazzo', 'Corona', 'Composizione', 'Altro'}
     tipo = data.get('tipo', fiore['tipo'])
-    if tipo not in tipi_validi:
-        conn.close()
-        return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(tipi_validi))}'}), 400
+    if tipo not in TIPI_VALIDI:
+        return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(TIPI_VALIDI))}'}), 400
 
-    conn.execute(
+    updated = query(
         '''UPDATE fiori
-           SET tipo = ?, descrizione = ?, costo = ?, pagato = ?, pagato_da = ?
-           WHERE id = ?''',
-        (
-            tipo,
-            data.get('descrizione', fiore['descrizione']),
-            float(data.get('costo', fiore['costo'])),
-            int(data.get('pagato', fiore['pagato'])),
-            data.get('pagato_da', fiore['pagato_da']),
-            fiore_id,
-        )
+           SET tipo = %s, descrizione = %s, scritta_fascia = %s, costo = %s, pagato = %s, pagato_da = %s
+           WHERE id = %s RETURNING *''',
+        (tipo,
+         data.get('descrizione', fiore['descrizione']),
+         data.get('scritta_fascia', fiore.get('scritta_fascia')),
+         float(data.get('costo', fiore['costo'])),
+         int(data.get('pagato', fiore['pagato'])),
+         data.get('pagato_da', fiore['pagato_da']),
+         fiore_id),
+        returning=True
     )
-    conn.commit()
-    updated = conn.execute('SELECT * FROM fiori WHERE id = ?', (fiore_id,)).fetchone()
-    conn.close()
-    return jsonify(row_to_dict(updated))
+    return jsonify(updated)
 
 
 @api.route('/api/fiori/<int:fiore_id>', methods=['DELETE'])
 def delete_fiore(fiore_id):
-    conn = get_db()
-    fiore = conn.execute('SELECT id FROM fiori WHERE id = ?', (fiore_id,)).fetchone()
+    fiore = query('SELECT id FROM fiori WHERE id = %s', (fiore_id,), fetchone=True)
     if not fiore:
-        conn.close()
         return jsonify({'error': 'Fiore non trovato'}), 404
-    conn.execute('DELETE FROM fiori WHERE id = ?', (fiore_id,))
-    conn.commit()
-    conn.close()
+    query('DELETE FROM fiori WHERE id = %s', (fiore_id,))
     return jsonify({'message': 'Fiore eliminato'})
 
 
@@ -229,25 +194,22 @@ def delete_fiore(fiore_id):
 
 @api.route('/api/defunti/<int:defunto_id>/riepilogo', methods=['GET'])
 def get_riepilogo(defunto_id):
-    conn = get_db()
-    defunto = conn.execute('SELECT * FROM defunti WHERE id = ?', (defunto_id,)).fetchone()
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
-        conn.close()
         return jsonify({'error': 'Defunto non trovato'}), 404
 
-    row = conn.execute(
+    row = query(
         '''SELECT
                COALESCE(SUM(costo), 0) AS totale_costi,
                COALESCE(SUM(CASE WHEN pagato = 1 THEN costo ELSE 0 END), 0) AS totale_pagato,
                COALESCE(SUM(CASE WHEN pagato = 0 THEN costo ELSE 0 END), 0) AS totale_da_pagare
-           FROM fiori WHERE defunto_id = ?''',
-        (defunto_id,)
-    ).fetchone()
-    conn.close()
+           FROM fiori WHERE defunto_id = %s''',
+        (defunto_id,), fetchone=True
+    )
 
     return jsonify({
         'defunto_id': defunto_id,
-        'totale_costi': row['totale_costi'],
-        'totale_pagato': row['totale_pagato'],
-        'totale_da_pagare': row['totale_da_pagare'],
+        'totale_costi': float(row['totale_costi']),
+        'totale_pagato': float(row['totale_pagato']),
+        'totale_da_pagare': float(row['totale_da_pagare']),
     })

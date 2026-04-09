@@ -1,16 +1,12 @@
-import sqlite3
 import os
+import psycopg2
+import psycopg2.extras
 
-if os.environ.get('VERCEL'):
-    DB_PATH = '/tmp/fiori.db'
-else:
-    DB_PATH = os.path.join(os.path.dirname(__file__), 'fiori.db')
+POSTGRES_URL = os.environ.get('POSTGRES_URL', '')
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = psycopg2.connect(POSTGRES_URL)
     return conn
 
 
@@ -20,7 +16,7 @@ def init_db():
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS defunti (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             nome TEXT NOT NULL,
             cognome TEXT NOT NULL,
             data_decesso TEXT,
@@ -33,17 +29,18 @@ def init_db():
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fiori (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            defunto_id INTEGER NOT NULL,
+            id SERIAL PRIMARY KEY,
+            defunto_id INTEGER NOT NULL REFERENCES defunti(id),
             tipo TEXT NOT NULL,
             descrizione TEXT,
-            costo REAL NOT NULL,
+            scritta_fascia TEXT,
+            costo REAL NOT NULL DEFAULT 0,
             pagato INTEGER DEFAULT 0,
             pagato_da TEXT,
-            data_inserimento TEXT,
-            FOREIGN KEY (defunto_id) REFERENCES defunti(id)
+            data_inserimento TEXT
         )
     ''')
 
     conn.commit()
+    cursor.close()
     conn.close()

@@ -245,7 +245,7 @@ function createDefuntoCard(def) {
   if (def.archiviato) card.classList.add('card--archived');
   card.setAttribute('role', 'button');
   card.setAttribute('tabindex', '0');
-  card.setAttribute('aria-label', `Apri scheda di ${def.nome} ${def.cognome}`);
+  card.setAttribute('aria-label', `Apri composizioni di ${def.nome} ${def.cognome}`);
 
   const archiviato = def.archiviato
     ? '<span class="badge badge--archived">Archiviato</span>'
@@ -254,13 +254,27 @@ function createDefuntoCard(def) {
   const totale = def.totale_costi !== undefined ? formatCurrency(def.totale_costi) : '';
   const nFiori = def.num_fiori || 0;
 
+  const azioni = def.archiviato ? '' : `
+    <div class="card__actions">
+      <button class="btn btn-ghost btn-icon-sm btn-edit-card" aria-label="Modifica ${def.cognome} ${def.nome}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+      <button class="btn btn-danger-ghost btn-icon-sm btn-archive-card" aria-label="Archivia ${def.cognome} ${def.nome}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </button>
+    </div>
+  `;
+
   card.innerHTML = `
     <div class="card__header">
       <div class="card__title-group">
         <h3 class="card__title">${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}</h3>
         ${archiviato}
       </div>
-      ${totale ? `<span class="card__amount">${totale}</span>` : ''}
+      <div class="card__right">
+        ${totale ? `<span class="card__amount">${totale}</span>` : ''}
+        ${azioni}
+      </div>
     </div>
     <div class="card__meta">
       ${def.data_decesso ? `<span class="card__date">${formatDate(def.data_decesso)}</span>` : ''}
@@ -269,11 +283,26 @@ function createDefuntoCard(def) {
     ${nFiori > 0 ? `<p class="card__count text-muted">${nFiori} composizione${nFiori !== 1 ? 'i' : ''}</p>` : ''}
   `;
 
-  function openDetail() { goToDettaglio(def.id); }
-  card.addEventListener('click', openDetail);
-  card.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); }
+  // Click sulla card (ma non sui bottoni) -> apri composizioni
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.card__actions')) return;
+    goToDettaglio(def.id);
   });
+  card.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToDettaglio(def.id); }
+  });
+
+  // Bottoni edit/archivia
+  if (!def.archiviato) {
+    card.querySelector('.btn-edit-card').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openModalDefunto(def);
+    });
+    card.querySelector('.btn-archive-card').addEventListener('click', (e) => {
+      e.stopPropagation();
+      archiviaDefuntoById(def.id, `${def.cognome} ${def.nome}`);
+    });
+  }
 
   return card;
 }
@@ -289,23 +318,8 @@ async function goToDettaglio(defuntoId) {
     state.fioriCorrente = defunto.fiori || [];
     state.filtroFiori = 'tutti';
 
-    // Header dettaglio
-    document.getElementById('detail-nome').textContent = `${defunto.cognome} ${defunto.nome}`;
-    const meta = [];
-    if (defunto.data_decesso) meta.push(formatDate(defunto.data_decesso));
-    if (defunto.luogo) meta.push(defunto.luogo);
-    document.getElementById('detail-meta').textContent = meta.join(' · ') || '';
-
-    const noteEl = document.getElementById('detail-note');
-    if (defunto.note) { noteEl.textContent = defunto.note; noteEl.hidden = false; }
-    else { noteEl.hidden = true; }
-
-    // Stato archiviato
     const isArchiviato = !!defunto.archiviato;
-    document.getElementById('btn-archive-defunto').hidden = isArchiviato;
-    document.getElementById('btn-edit-defunto').disabled = isArchiviato;
     document.getElementById('fab').hidden = isArchiviato;
-
     document.getElementById('navbar-title').textContent = `${defunto.cognome} ${defunto.nome}`;
 
     // Reset filtri
@@ -355,16 +369,22 @@ function renderFiori() {
 
 function createFioreEl(fiore, isArchiviato) {
   const article = document.createElement('article');
-  article.className = `fiore-item ${fiore.pagato ? 'fiore-item--pagato' : 'fiore-item--non-pagato'}`;
+  const isCopricassa = fiore.tipo === 'Copricassa';
+  article.className = `fiore-item ${isCopricassa ? 'fiore-item--copricassa' : (fiore.pagato ? 'fiore-item--pagato' : 'fiore-item--non-pagato')}`;
   article.dataset.id = fiore.id;
 
-  const pagatoBadge = fiore.pagato
-    ? '<span class="badge badge--success">Pagato</span>'
-    : '<span class="badge badge--danger">Non pagato</span>';
-
-  const pagatoDa = fiore.pagato && fiore.pagato_da
-    ? `<span class="fiore-item__pagato-da text-muted">da ${escapeHtml(fiore.pagato_da)}</span>`
-    : '';
+  let statoHtml = '';
+  if (isCopricassa) {
+    statoHtml = '<span class="badge badge--neutral">Incluso nel funerale</span>';
+  } else {
+    const pagatoBadge = fiore.pagato
+      ? '<span class="badge badge--success">Pagato</span>'
+      : '<span class="badge badge--danger">Non pagato</span>';
+    const pagatoDa = fiore.pagato && fiore.pagato_da
+      ? `<span class="fiore-item__pagato-da text-muted">da ${escapeHtml(fiore.pagato_da)}</span>`
+      : '';
+    statoHtml = pagatoBadge + pagatoDa;
+  }
 
   const azioni = isArchiviato ? '' : `
     <div class="fiore-item__actions">
@@ -373,18 +393,22 @@ function createFioreEl(fiore, isArchiviato) {
     </div>
   `;
 
+  const scrittaFascia = fiore.scritta_fascia
+    ? `<span class="fiore-item__fascia text-muted">"${escapeHtml(fiore.scritta_fascia)}"</span>`
+    : '';
+
   article.innerHTML = `
     <div class="fiore-item__top">
       <div class="fiore-item__info">
         <span class="badge badge--tipo">${escapeHtml(fiore.tipo)}</span>
         ${fiore.descrizione ? `<span class="fiore-item__desc">${escapeHtml(fiore.descrizione)}</span>` : ''}
+        ${scrittaFascia}
       </div>
-      <span class="fiore-item__costo">${formatCurrency(fiore.costo)}</span>
+      ${isCopricassa ? '' : `<span class="fiore-item__costo">${formatCurrency(fiore.costo)}</span>`}
     </div>
     <div class="fiore-item__bottom">
       <div class="fiore-item__stato">
-        ${pagatoBadge}
-        ${pagatoDa}
+        ${statoHtml}
       </div>
       ${azioni}
     </div>
@@ -485,21 +509,9 @@ async function submitFormDefunto(e) {
 
   try {
     if (id) {
-      const updated = await apiUpdateDefunto(id, payload);
+      await apiUpdateDefunto(id, payload);
       showToast('Defunto aggiornato.');
       closeModal('modal-defunto-backdrop');
-      if (state.view === 'dettaglio' && state.defuntoCorrente) {
-        state.defuntoCorrente = { ...state.defuntoCorrente, ...updated };
-        document.getElementById('detail-nome').textContent = `${updated.cognome} ${updated.nome}`;
-        const meta = [];
-        if (updated.data_decesso) meta.push(formatDate(updated.data_decesso));
-        if (updated.luogo) meta.push(updated.luogo);
-        document.getElementById('detail-meta').textContent = meta.join(' · ');
-        const noteEl = document.getElementById('detail-note');
-        if (updated.note) { noteEl.textContent = updated.note; noteEl.hidden = false; }
-        else { noteEl.hidden = true; }
-        document.getElementById('navbar-title').textContent = `${updated.cognome} ${updated.nome}`;
-      }
     } else {
       await apiCreateDefunto(payload);
       showToast('Defunto aggiunto con successo.');
@@ -526,17 +538,20 @@ function openModalFiore(fiore = null) {
   form.reset();
   errEl.hidden = true;
   setPagatoDaVisibility(false);
+  setCopricassaMode(false);
 
   if (fiore) {
     title.textContent = 'Modifica Composizione';
     document.getElementById('fiore-id').value = fiore.id;
     document.getElementById('fiore-tipo').value = fiore.tipo || '';
     document.getElementById('fiore-descrizione').value = fiore.descrizione || '';
+    document.getElementById('fiore-scritta-fascia').value = fiore.scritta_fascia || '';
     document.getElementById('fiore-costo').value = fiore.costo !== undefined ? fiore.costo : '';
     const pagato = !!fiore.pagato;
     document.getElementById('fiore-pagato').checked = pagato;
     document.getElementById('fiore-pagato-da').value = fiore.pagato_da || '';
     setPagatoDaVisibility(pagato);
+    setCopricassaMode(fiore.tipo === 'Copricassa');
   } else {
     title.textContent = 'Aggiungi Composizione';
     document.getElementById('fiore-id').value = '';
@@ -549,6 +564,17 @@ function setPagatoDaVisibility(show) {
   document.getElementById('group-pagato-da').style.display = show ? '' : 'none';
 }
 
+function setCopricassaMode(isCopricassa) {
+  document.getElementById('group-costo').style.display = isCopricassa ? 'none' : '';
+  document.getElementById('group-pagato').style.display = isCopricassa ? 'none' : '';
+  document.getElementById('group-pagato-da').style.display = isCopricassa ? 'none' : '';
+  if (isCopricassa) {
+    document.getElementById('fiore-costo').removeAttribute('required');
+  } else {
+    document.getElementById('fiore-costo').setAttribute('required', '');
+  }
+}
+
 async function submitFormFiore(e) {
   e.preventDefault();
   const errEl = document.getElementById('form-fiore-error');
@@ -556,24 +582,31 @@ async function submitFormFiore(e) {
 
   const id = document.getElementById('fiore-id').value;
   const tipo = document.getElementById('fiore-tipo').value;
-  const costoStr = document.getElementById('fiore-costo').value;
-  const pagato = document.getElementById('fiore-pagato').checked;
+  const isCopricassa = tipo === 'Copricassa';
 
   if (!tipo) {
     errEl.textContent = 'Seleziona un tipo di composizione.';
     errEl.hidden = false;
     return;
   }
-  const costo = parseFloat(costoStr);
-  if (costoStr === '' || isNaN(costo) || costo < 0) {
-    errEl.textContent = 'Inserisci un costo valido (>= 0).';
-    errEl.hidden = false;
-    return;
+
+  let costo = 0;
+  let pagato = false;
+  if (!isCopricassa) {
+    const costoStr = document.getElementById('fiore-costo').value;
+    costo = parseFloat(costoStr);
+    if (costoStr === '' || isNaN(costo) || costo < 0) {
+      errEl.textContent = 'Inserisci un costo valido (>= 0).';
+      errEl.hidden = false;
+      return;
+    }
+    pagato = document.getElementById('fiore-pagato').checked;
   }
 
   const payload = {
     tipo,
     descrizione: document.getElementById('fiore-descrizione').value.trim() || null,
+    scritta_fascia: document.getElementById('fiore-scritta-fascia').value.trim() || null,
     costo,
     pagato: pagato ? 1 : 0,
     pagato_da: pagato ? (document.getElementById('fiore-pagato-da').value.trim() || null) : null,
@@ -627,19 +660,12 @@ function deleteFiore(fioreId) {
 // ARCHIVIA DEFUNTO
 // -------------------------------------------------------
 
-function archiviaDefunto() {
-  const def = state.defuntoCorrente;
-  if (!def) return;
+function archiviaDefuntoById(id, nomeCompleto) {
   showConfirm(
-    `Archiviare la pratica di ${def.cognome} ${def.nome}? La scheda diventera' di sola lettura.`,
+    `Archiviare la pratica di ${nomeCompleto}? La scheda diventera' di sola lettura.`,
     async () => {
       try {
-        await apiArchiveDefunto(def.id);
-        state.defuntoCorrente.archiviato = 1;
-        document.getElementById('btn-archive-defunto').hidden = true;
-        document.getElementById('btn-edit-defunto').disabled = true;
-        document.getElementById('fab').hidden = true;
-        renderFiori();
+        await apiArchiveDefunto(id);
         loadDefunti();
         showToast('Pratica archiviata.');
       } catch (err) {
@@ -706,13 +732,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setPagatoDaVisibility(e.target.checked);
   });
 
-  // --- Modifica defunto ---
-  document.getElementById('btn-edit-defunto').addEventListener('click', () => {
-    if (state.defuntoCorrente) openModalDefunto(state.defuntoCorrente);
+  // --- Toggle campi per Copricassa ---
+  document.getElementById('fiore-tipo').addEventListener('change', e => {
+    const isCopricassa = e.target.value === 'Copricassa';
+    setCopricassaMode(isCopricassa);
   });
-
-  // --- Archivia defunto ---
-  document.getElementById('btn-archive-defunto').addEventListener('click', archiviaDefunto);
 
   // --- Filtri fiori ---
   document.querySelectorAll('.filter-tab').forEach(btn => {

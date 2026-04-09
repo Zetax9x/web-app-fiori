@@ -210,30 +210,35 @@
 }
 
 /* -------------------------------------------------------
-   DETAIL CARD
+   CARD ACTIONS (inline edit/archive)
    ------------------------------------------------------- */
-.detail-card .card-header {
+.card__right {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.detail-header-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.detail-header-actions {
-  display: flex;
+  align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  flex-wrap: wrap;
 }
 
-.detail-note {
-  font-size: var(--font-size-sm);
-  margin-top: var(--space-2);
+.card__actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.btn-icon-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.btn-icon-sm svg {
+  pointer-events: none;
 }
 
 /* -------------------------------------------------------
@@ -304,6 +309,10 @@
   border-left-color: var(--color-danger);
 }
 
+.fiore-item--copricassa {
+  border-left-color: var(--color-text-muted);
+}
+
 .fiore-item__top {
   display: flex;
   align-items: flex-start;
@@ -351,6 +360,21 @@
 
 .fiore-item__pagato-da {
   font-style: italic;
+}
+
+.fiore-item__fascia {
+  font-style: italic;
+  font-size: var(--font-size-sm);
+}
+
+.badge--neutral {
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  border: 1px solid var(--color-border);
 }
 
 .fiore-item__actions {

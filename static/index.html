@@ -52,23 +52,8 @@
       </div>
     </section>
 
-    <!-- VIEW: DETTAGLIO DEFUNTO -->
-    <section id="view-dettaglio" class="view-section" hidden aria-label="Dettaglio defunto">
-
-      <!-- Info defunto -->
-      <div class="card detail-card" id="card-defunto-info">
-        <div class="card-header">
-          <div class="detail-header-info">
-            <h2 class="card-title" id="detail-nome">-</h2>
-            <p class="card-subtitle" id="detail-meta">-</p>
-            <p id="detail-note" class="detail-note text-muted" hidden></p>
-          </div>
-          <div class="detail-header-actions">
-            <button id="btn-edit-defunto" class="btn btn-ghost btn-sm" aria-label="Modifica defunto">Modifica</button>
-            <button id="btn-archive-defunto" class="btn btn-danger-ghost btn-sm" aria-label="Archivia pratica">Archivia</button>
-          </div>
-        </div>
-      </div>
+    <!-- VIEW: COMPOSIZIONI DEFUNTO -->
+    <section id="view-dettaglio" class="view-section" hidden aria-label="Composizioni defunto">
 
       <!-- Filtro fiori -->
       <div class="filter-tabs" role="group" aria-label="Filtra composizioni">
@@ -176,11 +161,12 @@
             <label class="form-label" for="fiore-tipo">Tipo <span class="required" aria-hidden="true">*</span></label>
             <select id="fiore-tipo" class="form-control form-select" required>
               <option value="">Seleziona tipo...</option>
-              <option value="Copricassa">Copricassa</option>
               <option value="Cuscino">Cuscino</option>
-              <option value="Mazzo">Mazzo</option>
-              <option value="Corona">Corona</option>
-              <option value="Composizione">Composizione</option>
+              <option value="Cuscino Grande">Cuscino Grande</option>
+              <option value="Cuore">Cuore</option>
+              <option value="Cuore Grande">Cuore Grande</option>
+              <option value="Copricassa">Copricassa</option>
+              <option value="Mazzo di fiori">Mazzo di fiori</option>
               <option value="Altro">Altro</option>
             </select>
           </div>
@@ -189,13 +175,17 @@
             <input type="text" id="fiore-descrizione" class="form-control" placeholder="Es. Cuscino bianco con rose rosse" />
           </div>
           <div class="form-group">
+            <label class="form-label" for="fiore-scritta-fascia">Scritta fascia</label>
+            <input type="text" id="fiore-scritta-fascia" class="form-control" placeholder="Es. Con affetto, la famiglia" />
+          </div>
+          <div class="form-group" id="group-costo">
             <label class="form-label" for="fiore-costo">Costo (EUR) <span class="required" aria-hidden="true">*</span></label>
             <div class="input-group input-currency">
               <span class="input-prefix">€</span>
               <input type="number" id="fiore-costo" class="form-control" min="0" step="0.01" required placeholder="0.00" />
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="group-pagato">
             <label class="form-check">
               <input type="checkbox" id="fiore-pagato" class="form-check-input" />
               <span class="form-check-label">Pagato</span>
