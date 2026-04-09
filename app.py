@@ -10,7 +10,14 @@ app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
 
 app.register_blueprint(api)
 
-init_db()
+_db_initialized = False
+
+@app.before_request
+def ensure_db():
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
 
 
 @app.route('/')

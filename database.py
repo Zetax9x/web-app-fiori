@@ -2,11 +2,16 @@ import os
 import psycopg2
 import psycopg2.extras
 
-POSTGRES_URL = os.environ.get('POSTGRES_URL', '')
+def get_postgres_url():
+    url = os.environ.get('POSTGRES_URL') or os.environ.get('POSTGRES_URL_NON_POOLING', '')
+    # Vercel fornisce postgres:// ma psycopg2 richiede postgresql://
+    if url.startswith('postgres://'):
+        url = 'postgresql://' + url[len('postgres://'):]
+    return url
 
 
 def get_db():
-    conn = psycopg2.connect(POSTGRES_URL)
+    conn = psycopg2.connect(get_postgres_url())
     return conn
 
 
