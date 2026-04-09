@@ -374,9 +374,9 @@ function renderFiori() {
   let fiori = [...state.fioriCorrente];
 
   if (state.filtroFiori === 'pagati') {
-    fiori = fiori.filter(f => f.pagato);
+    fiori = fiori.filter(f => f.pagato || f.tipo === 'Copricassa');
   } else if (state.filtroFiori === 'non-pagati') {
-    fiori = fiori.filter(f => !f.pagato);
+    fiori = fiori.filter(f => !f.pagato && f.tipo !== 'Copricassa');
   }
 
   if (!fiori || fiori.length === 0) {
@@ -589,11 +589,12 @@ function setPagatoDaVisibility(show) {
 function setCopricassaMode(isCopricassa) {
   document.getElementById('group-costo').style.display = isCopricassa ? 'none' : '';
   document.getElementById('group-pagato').style.display = isCopricassa ? 'none' : '';
-  document.getElementById('group-pagato-da').style.display = isCopricassa ? 'none' : '';
   if (isCopricassa) {
+    document.getElementById('group-pagato-da').style.display = 'none';
     document.getElementById('fiore-costo').removeAttribute('required');
   } else {
     document.getElementById('fiore-costo').setAttribute('required', '');
+    setPagatoDaVisibility(document.getElementById('fiore-pagato').checked);
   }
 }
 
