@@ -291,7 +291,7 @@ function createDefuntoCard(def) {
       ${def.data_decesso ? `<span class="card__date">${formatDate(def.data_decesso)}</span>` : ''}
       ${def.luogo ? `<span class="card__luogo">&bull; ${escapeHtml(def.luogo)}</span>` : ''}
     </div>
-    ${nFiori > 0 ? `<p class="card__count text-muted">${nFiori} composizione${nFiori !== 1 ? 'i' : ''}</p>` : ''}
+    ${nFiori > 0 ? `<p class="card__count text-muted">${nFiori} composizion${nFiori !== 1 ? 'i' : 'e'}</p>` : ''}
   `;
 
   // Click sulla card (ma non sui bottoni) -> apri composizioni
