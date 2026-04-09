@@ -204,7 +204,7 @@ function showView(name) {
 
   if (name === 'lista') {
     btnBack.hidden = true;
-    navbarTitle.textContent = 'Fiori';
+    navbarTitle.textContent = 'Lista defunti';
     fab.hidden = false;
     fab.setAttribute('aria-label', 'Aggiungi defunto');
     btnArchived.hidden = false;
@@ -251,8 +251,18 @@ function createDefuntoCard(def) {
     ? '<span class="badge badge--archived">Archiviato</span>'
     : '';
 
-  const totale = def.totale_costi !== undefined ? formatCurrency(def.totale_costi) : '';
+  const totale = def.totale_costi !== undefined && def.totale_costi > 0 ? formatCurrency(def.totale_costi) : '';
   const nFiori = def.num_fiori || 0;
+
+  // Indicatore stato pagamento
+  let statoIcon = '';
+  if (nFiori > 0 && !def.archiviato) {
+    if (def.non_pagati > 0) {
+      statoIcon = '<span class="card__stato card__stato--pending" title="Ci sono pagamenti in sospeso">&#9679;</span>';
+    } else {
+      statoIcon = '<span class="card__stato card__stato--ok" title="Tutto pagato">&#10003;</span>';
+    }
+  }
 
   const azioni = def.archiviato ? '' : `
     <div class="card__actions">
@@ -269,6 +279,7 @@ function createDefuntoCard(def) {
     <div class="card__header">
       <div class="card__title-group">
         <h3 class="card__title">${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}</h3>
+        ${statoIcon}
         ${archiviato}
       </div>
       <div class="card__right">

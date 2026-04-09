@@ -65,6 +65,10 @@
   margin-right: var(--space-1);
 }
 
+.navbar-back-btn[hidden] {
+  display: none !important;
+}
+
 .navbar-archived-btn {
   color: rgba(245,245,240,0.8) !important;
   font-size: var(--font-size-sm);
@@ -168,6 +172,20 @@
 
 .card__count {
   margin: 0;
+}
+
+.card__stato {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+}
+
+.card__stato--ok {
+  color: var(--color-success);
+}
+
+.card__stato--pending {
+  color: var(--color-danger);
 }
 
 /* -------------------------------------------------------

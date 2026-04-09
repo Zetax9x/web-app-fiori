@@ -37,18 +37,29 @@ def query(sql, params=(), fetchone=False, fetchall=False, returning=False):
 @api.route('/api/defunti', methods=['GET'])
 def get_defunti():
     search = request.args.get('search', '').strip()
+    base = '''SELECT d.*,
+                 COALESCE(f.num_fiori, 0) AS num_fiori,
+                 COALESCE(f.totale_costi, 0) AS totale_costi,
+                 COALESCE(f.non_pagati, 0) AS non_pagati
+              FROM defunti d
+              LEFT JOIN (
+                  SELECT defunto_id,
+                         COUNT(*) AS num_fiori,
+                         SUM(costo) AS totale_costi,
+                         SUM(CASE WHEN pagato = 0 AND tipo != 'Copricassa' THEN 1 ELSE 0 END) AS non_pagati
+                  FROM fiori GROUP BY defunto_id
+              ) f ON f.defunto_id = d.id'''
     if search:
         pattern = f'%{search}%'
         rows = query(
-            '''SELECT * FROM defunti
-               WHERE archiviato = 0
-                 AND (nome ILIKE %s OR cognome ILIKE %s OR luogo ILIKE %s)
-               ORDER BY data_inserimento DESC''',
+            base + ''' WHERE d.archiviato = 0
+                 AND (d.nome ILIKE %s OR d.cognome ILIKE %s OR d.luogo ILIKE %s)
+               ORDER BY d.data_inserimento DESC''',
             (pattern, pattern, pattern), fetchall=True
         )
     else:
         rows = query(
-            'SELECT * FROM defunti WHERE archiviato = 0 ORDER BY data_inserimento DESC',
+            base + ' WHERE d.archiviato = 0 ORDER BY d.data_inserimento DESC',
             fetchall=True
         )
     return jsonify(rows)
