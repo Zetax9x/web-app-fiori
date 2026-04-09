@@ -192,8 +192,13 @@
             </label>
           </div>
           <div class="form-group" id="group-pagato-da">
-            <label class="form-label" for="fiore-pagato-da">Chi ha pagato</label>
-            <input type="text" id="fiore-pagato-da" class="form-control" placeholder="Nome del pagante" />
+            <label class="form-label" for="fiore-pagato-da">Come ha pagato</label>
+            <select id="fiore-pagato-da" class="form-control form-select" required>
+              <option value="">Seleziona tipo...</option>
+              <option value="Bonifico">Bonifico</option>
+              <option value="Contanti">Contanti</option>
+              <option value="Assegno">Assegno</option>
+            </select>
           </div>
           <div id="form-fiore-error" class="form-error" role="alert" hidden></div>
         </form>

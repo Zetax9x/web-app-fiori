@@ -172,6 +172,10 @@ async function apiArchiveDefunto(id) {
   return apiFetch(`/api/defunti/${id}`, { method: 'DELETE' });
 }
 
+async function apiDeleteDefunto(id) {
+  return apiFetch(`/api/defunti/${id}/elimina`, { method: 'DELETE' });
+}
+
 async function apiCreateFiore(defuntoId, data) {
   return apiFetch(`/api/defunti/${defuntoId}/fiori`, { method: 'POST', body: JSON.stringify(data) });
 }
@@ -272,6 +276,9 @@ function createDefuntoCard(def) {
       <button class="btn btn-danger-ghost btn-icon-sm btn-archive-card" aria-label="Archivia ${def.cognome} ${def.nome}">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
       </button>
+      <button class="btn btn-danger-ghost btn-icon-sm btn-delete-card" aria-label="Elimina ${def.cognome} ${def.nome}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      </button>
     </div>
   `;
 
@@ -303,7 +310,7 @@ function createDefuntoCard(def) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToDettaglio(def.id); }
   });
 
-  // Bottoni edit/archivia
+  // Bottoni edit/archivia/elimina
   if (!def.archiviato) {
     card.querySelector('.btn-edit-card').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -312,6 +319,10 @@ function createDefuntoCard(def) {
     card.querySelector('.btn-archive-card').addEventListener('click', (e) => {
       e.stopPropagation();
       archiviaDefuntoById(def.id, `${def.cognome} ${def.nome}`);
+    });
+    card.querySelector('.btn-delete-card').addEventListener('click', (e) => {
+      e.stopPropagation();
+      eliminaDefuntoById(def.id, `${def.cognome} ${def.nome}`);
     });
   }
 
@@ -679,6 +690,21 @@ function archiviaDefuntoById(id, nomeCompleto) {
         await apiArchiveDefunto(id);
         loadDefunti();
         showToast('Pratica archiviata.');
+      } catch (err) {
+        showToast('Errore: ' + err.message, 'error');
+      }
+    }
+  );
+}
+
+function eliminaDefuntoById(id, nomeCompleto) {
+  showConfirm(
+    `Eliminare definitivamente ${nomeCompleto} e tutte le composizioni associate? L'operazione non e' reversibile.`,
+    async () => {
+      try {
+        await apiDeleteDefunto(id);
+        loadDefunti();
+        showToast('Defunto e composizioni eliminati.');
       } catch (err) {
         showToast('Errore: ' + err.message, 'error');
       }

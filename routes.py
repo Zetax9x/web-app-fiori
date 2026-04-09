@@ -125,6 +125,16 @@ def archive_defunto(defunto_id):
     return jsonify({'message': 'Defunto archiviato'})
 
 
+@api.route('/api/defunti/<int:defunto_id>/elimina', methods=['DELETE'])
+def delete_defunto(defunto_id):
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
+    if not defunto:
+        return jsonify({'error': 'Defunto non trovato'}), 404
+    query('DELETE FROM fiori WHERE defunto_id = %s', (defunto_id,))
+    query('DELETE FROM defunti WHERE id = %s', (defunto_id,))
+    return jsonify({'message': 'Defunto e composizioni eliminati'})
+
+
 # --- Fiori per defunto ---
 
 @api.route('/api/defunti/<int:defunto_id>/fiori', methods=['GET'])
