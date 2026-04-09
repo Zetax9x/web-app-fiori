@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Gestione fiori per onoranze funebri" />
+  <title>Fiori - Onoranze Funebri</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+
+  <!-- ===== HEADER / NAVBAR ===== -->
+  <header class="navbar" role="banner">
+    <div class="navbar-brand">
+      <button id="btn-back" class="btn btn-ghost btn-icon navbar-back-btn" aria-label="Torna indietro" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span class="navbar-logo-icon" aria-hidden="true">&#10047;</span>
+      <span class="navbar-brand" id="navbar-title">Fiori</span>
+    </div>
+    <div class="navbar-right">
+      <button id="btn-show-archived" class="btn btn-ghost btn-sm navbar-archived-btn" aria-pressed="false">
+        Archivio
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== MAIN ===== -->
+  <main class="app-page" id="app" role="main">
+
+    <!-- VIEW: LISTA DEFUNTI -->
+    <section id="view-lista" class="view-section" aria-label="Lista defunti">
+      <!-- Barra ricerca -->
+      <div class="search-wrapper">
+        <label for="input-search" class="sr-only">Cerca defunto</label>
+        <div class="input-group">
+          <span class="input-prefix">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <input type="search" id="input-search" class="form-control search-input" placeholder="Cerca per nome o cognome..." autocomplete="off" />
+        </div>
+      </div>
+
+      <!-- Lista cards -->
+      <div id="lista-defunti" class="defunti-grid" aria-live="polite" aria-label="Elenco defunti">
+        <div class="empty-state" id="lista-empty" hidden>
+          <div class="empty-state-icon" aria-hidden="true">&#10047;</div>
+          <p class="empty-state-title">Nessun defunto registrato</p>
+          <p class="empty-state-sub">Clicca il bottone + per iniziare.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW: DETTAGLIO DEFUNTO -->
+    <section id="view-dettaglio" class="view-section" hidden aria-label="Dettaglio defunto">
+
+      <!-- Info defunto -->
+      <div class="card detail-card" id="card-defunto-info">
+        <div class="card-header">
+          <div class="detail-header-info">
+            <h2 class="card-title" id="detail-nome">-</h2>
+            <p class="card-subtitle" id="detail-meta">-</p>
+            <p id="detail-note" class="detail-note text-muted" hidden></p>
+          </div>
+          <div class="detail-header-actions">
+            <button id="btn-edit-defunto" class="btn btn-ghost btn-sm" aria-label="Modifica defunto">Modifica</button>
+            <button id="btn-archive-defunto" class="btn btn-danger-ghost btn-sm" aria-label="Archivia pratica">Archivia</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filtro fiori -->
+      <div class="filter-tabs" role="group" aria-label="Filtra composizioni">
+        <button class="filter-tab active" data-filter="tutti" aria-pressed="true">Tutti</button>
+        <button class="filter-tab" data-filter="pagati" aria-pressed="false">Pagati</button>
+        <button class="filter-tab" data-filter="non-pagati" aria-pressed="false">Non pagati</button>
+      </div>
+
+      <!-- Lista fiori -->
+      <div id="lista-fiori" class="fiori-list" aria-live="polite" aria-label="Lista composizioni">
+        <div class="empty-state" id="fiori-empty" hidden>
+          <div class="empty-state-icon" aria-hidden="true">&#127800;</div>
+          <p class="empty-state-title">Nessuna composizione</p>
+          <p class="empty-state-sub">Clicca + per aggiungere la prima composizione.</p>
+        </div>
+      </div>
+
+      <!-- Riepilogo costi -->
+      <div class="card riepilogo-card" id="riepilogo-costi" aria-label="Riepilogo costi">
+        <div class="card-body">
+          <h3 class="riepilogo-title">Riepilogo</h3>
+          <div class="riepilogo-grid">
+            <div class="riepilogo-item">
+              <span class="riepilogo-label">Totale</span>
+              <span class="riepilogo-value" id="riepilogo-totale">€ 0,00</span>
+            </div>
+            <div class="riepilogo-item riepilogo-item-success">
+              <span class="riepilogo-label">Pagato</span>
+              <span class="riepilogo-value text-success" id="riepilogo-pagato">€ 0,00</span>
+            </div>
+            <div class="riepilogo-item riepilogo-item-danger">
+              <span class="riepilogo-label">Da pagare</span>
+              <span class="riepilogo-value text-danger" id="riepilogo-da-pagare">€ 0,00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ===== FAB (Floating Action Button) ===== -->
+  <button id="fab" class="fab" aria-label="Aggiungi">
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+
+  <!-- ===== MODAL DEFUNTO ===== -->
+  <div id="modal-defunto-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-defunto-title">
+    <div class="modal">
+      <div class="modal-handle" aria-hidden="true"></div>
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-defunto-title">Nuovo Defunto</h2>
+        <button class="modal-close" id="modal-defunto-close" aria-label="Chiudi">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="form-defunto" novalidate>
+          <input type="hidden" id="defunto-id" value="" />
+          <div class="form-group">
+            <label class="form-label" for="defunto-nome">Nome <span class="required" aria-hidden="true">*</span></label>
+            <input type="text" id="defunto-nome" class="form-control" required autocomplete="given-name" placeholder="Es. Mario" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="defunto-cognome">Cognome <span class="required" aria-hidden="true">*</span></label>
+            <input type="text" id="defunto-cognome" class="form-control" required autocomplete="family-name" placeholder="Es. Rossi" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="defunto-data-decesso">Data di decesso</label>
+            <input type="date" id="defunto-data-decesso" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="defunto-luogo">Luogo</label>
+            <input type="text" id="defunto-luogo" class="form-control" placeholder="Es. Milano" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="defunto-note">Note</label>
+            <textarea id="defunto-note" class="form-control" rows="3" placeholder="Note aggiuntive..."></textarea>
+          </div>
+          <div id="form-defunto-error" class="form-error" role="alert" hidden></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="modal-defunto-cancel">Annulla</button>
+        <button type="submit" form="form-defunto" class="btn btn-primary" id="modal-defunto-submit">Salva</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL FIORE ===== -->
+  <div id="modal-fiore-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-fiore-title">
+    <div class="modal">
+      <div class="modal-handle" aria-hidden="true"></div>
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-fiore-title">Aggiungi Composizione</h2>
+        <button class="modal-close" id="modal-fiore-close" aria-label="Chiudi">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="form-fiore" novalidate>
+          <input type="hidden" id="fiore-id" value="" />
+          <div class="form-group">
+            <label class="form-label" for="fiore-tipo">Tipo <span class="required" aria-hidden="true">*</span></label>
+            <select id="fiore-tipo" class="form-control form-select" required>
+              <option value="">Seleziona tipo...</option>
+              <option value="Copricassa">Copricassa</option>
+              <option value="Cuscino">Cuscino</option>
+              <option value="Mazzo">Mazzo</option>
+              <option value="Corona">Corona</option>
+              <option value="Composizione">Composizione</option>
+              <option value="Altro">Altro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fiore-descrizione">Descrizione</label>
+            <input type="text" id="fiore-descrizione" class="form-control" placeholder="Es. Cuscino bianco con rose rosse" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fiore-costo">Costo (EUR) <span class="required" aria-hidden="true">*</span></label>
+            <div class="input-group input-currency">
+              <span class="input-prefix">€</span>
+              <input type="number" id="fiore-costo" class="form-control" min="0" step="0.01" required placeholder="0.00" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-check">
+              <input type="checkbox" id="fiore-pagato" class="form-check-input" />
+              <span class="form-check-label">Pagato</span>
+            </label>
+          </div>
+          <div class="form-group" id="group-pagato-da">
+            <label class="form-label" for="fiore-pagato-da">Chi ha pagato</label>
+            <input type="text" id="fiore-pagato-da" class="form-control" placeholder="Nome del pagante" />
+          </div>
+          <div id="form-fiore-error" class="form-error" role="alert" hidden></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="modal-fiore-cancel">Annulla</button>
+        <button type="submit" form="form-fiore" class="btn btn-primary" id="modal-fiore-submit">Salva</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL CONFERMA ===== -->
+  <div id="modal-confirm-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-confirm-title">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-confirm-title">Conferma</h2>
+      </div>
+      <div class="modal-body">
+        <p id="modal-confirm-message" class="confirm-message"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="modal-confirm-cancel">Annulla</button>
+        <button type="button" class="btn btn-danger" id="modal-confirm-ok">Conferma</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOAST ===== -->
+  <div id="toast-container" class="toast-container" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
