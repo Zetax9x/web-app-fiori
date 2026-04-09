@@ -200,22 +200,35 @@ function showView(name) {
   state.view = name;
   document.getElementById('view-lista').hidden = name !== 'lista';
   document.getElementById('view-dettaglio').hidden = name !== 'dettaglio';
+  document.getElementById('view-statistiche').hidden = name !== 'statistiche';
 
   const btnBack = document.getElementById('btn-back');
   const navbarTitle = document.getElementById('navbar-title');
   const fab = document.getElementById('fab');
   const btnArchived = document.getElementById('btn-show-archived');
+  const btnStats = document.getElementById('btn-show-stats');
 
   if (name === 'lista') {
-    btnBack.hidden = true;
-    navbarTitle.textContent = 'Lista defunti';
-    fab.hidden = false;
+    btnBack.hidden = !state.mostraArchiviati;
+    navbarTitle.textContent = state.mostraArchiviati ? 'Archivio' : 'Lista defunti';
+    fab.hidden = state.mostraArchiviati;
     fab.setAttribute('aria-label', 'Aggiungi defunto');
-    btnArchived.hidden = false;
+    btnArchived.hidden = state.mostraArchiviati;
+    btnStats.hidden = state.mostraArchiviati;
+    document.querySelector('.search-wrapper').style.display = state.mostraArchiviati ? 'none' : '';
+  } else if (name === 'statistiche') {
+    btnBack.hidden = false;
+    btnArchived.hidden = true;
+    btnStats.hidden = true;
+    fab.hidden = true;
+    navbarTitle.textContent = 'Statistiche';
+    document.querySelector('.search-wrapper').style.display = 'none';
   } else {
     btnBack.hidden = false;
     btnArchived.hidden = true;
+    btnStats.hidden = true;
     fab.setAttribute('aria-label', 'Aggiungi composizione');
+    document.querySelector('.search-wrapper').style.display = '';
   }
 }
 
@@ -233,6 +246,13 @@ function renderListaDefunti(defunti) {
   });
 
   if (!defunti || defunti.length === 0) {
+    if (state.mostraArchiviati) {
+      emptyEl.querySelector('.empty-state-title').textContent = 'Nessun defunto archiviato';
+      emptyEl.querySelector('.empty-state-sub').textContent = 'Non ci sono pratiche archiviate.';
+    } else {
+      emptyEl.querySelector('.empty-state-title').textContent = 'Nessun defunto registrato';
+      emptyEl.querySelector('.empty-state-sub').textContent = 'Clicca il bottone + per iniziare.';
+    }
     emptyEl.hidden = false;
     return;
   }
@@ -403,7 +423,7 @@ function createFioreEl(fiore, isArchiviato) {
       ? '<span class="badge badge--success">Pagato</span>'
       : '<span class="badge badge--danger">Non pagato</span>';
     const pagatoDa = fiore.pagato && fiore.pagato_da
-      ? `<span class="fiore-item__pagato-da text-muted">da ${escapeHtml(fiore.pagato_da)}</span>`
+      ? `<span class="fiore-item__pagato-da text-muted">con ${escapeHtml(fiore.pagato_da)}</span>`
       : '';
     statoHtml = pagatoBadge + pagatoDa;
   }
@@ -714,6 +734,125 @@ function eliminaDefuntoById(id, nomeCompleto) {
 }
 
 // -------------------------------------------------------
+// STATISTICHE
+// -------------------------------------------------------
+
+const MESI_IT = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
+function formatMese(meseStr) {
+  if (!meseStr) return '';
+  const parts = meseStr.split('-');
+  if (parts.length === 2) {
+    const m = parseInt(parts[1], 10);
+    return `${MESI_IT[m] || parts[1]} ${parts[0]}`;
+  }
+  return meseStr;
+}
+
+async function apiGetStatistiche(anno) {
+  const params = anno ? `?anno=${anno}` : '';
+  return apiFetch(`/api/statistiche${params}`);
+}
+
+function buildTable(headers, rows) {
+  if (!rows || rows.length === 0) {
+    return '<p class="text-muted stats-no-data">Nessun dato disponibile</p>';
+  }
+  let html = '<table class="stats-table"><thead><tr>';
+  headers.forEach(h => { html += `<th>${h.label}</th>`; });
+  html += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    html += '<tr>';
+    headers.forEach(h => {
+      const val = h.format ? h.format(row[h.key]) : row[h.key];
+      const cls = h.align === 'right' ? ' class="text-right"' : '';
+      html += `<td${cls}>${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+async function loadStatistiche(anno) {
+  try {
+    const s = await apiGetStatistiche(anno);
+
+    // Popola select anni
+    const select = document.getElementById('stats-anno');
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">Tutti gli anni</option>';
+    (s.anni || []).forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a;
+      opt.textContent = a;
+      select.appendChild(opt);
+    });
+    select.value = anno || currentVal || '';
+
+    // Panoramica
+    document.getElementById('stats-pratiche-totali').textContent = s.pratiche_totali;
+    document.getElementById('stats-pratiche-attive').textContent = s.pratiche_attive;
+    document.getElementById('stats-pratiche-archiviate').textContent = s.pratiche_archiviate;
+    document.getElementById('stats-composizioni-totali').textContent = s.composizioni_totali;
+
+    // Economico
+    document.getElementById('stats-fatturato').textContent = formatCurrency(s.fatturato);
+    document.getElementById('stats-incassato').textContent = formatCurrency(s.incassato);
+    document.getElementById('stats-da-incassare').textContent = formatCurrency(s.da_incassare);
+    document.getElementById('stats-costo-medio-pratica').textContent = formatCurrency(s.costo_medio_pratica);
+    document.getElementById('stats-costo-medio-comp').textContent = formatCurrency(s.costo_medio_comp);
+    document.getElementById('stats-comp-media-pratica').textContent = s.comp_media_pratica;
+
+    // Per tipo
+    document.getElementById('stats-per-tipo').innerHTML = buildTable(
+      [
+        { label: 'Tipo', key: 'tipo' },
+        { label: 'Quantita\'', key: 'quantita', align: 'right' },
+        { label: 'Totale', key: 'totale', align: 'right', format: formatCurrency },
+        { label: 'Media', key: 'media', align: 'right', format: formatCurrency },
+      ],
+      s.per_tipo
+    );
+
+    // Per metodo
+    document.getElementById('stats-per-metodo').innerHTML = buildTable(
+      [
+        { label: 'Metodo', key: 'metodo' },
+        { label: 'Quantita\'', key: 'quantita', align: 'right' },
+        { label: 'Totale', key: 'totale', align: 'right', format: formatCurrency },
+      ],
+      s.per_metodo
+    );
+
+    // Per mese
+    document.getElementById('stats-per-mese').innerHTML = buildTable(
+      [
+        { label: 'Mese', key: 'mese', format: formatMese },
+        { label: 'Pratiche', key: 'pratiche', align: 'right' },
+        { label: 'Composizioni', key: 'composizioni', align: 'right' },
+        { label: 'Totale', key: 'totale', align: 'right', format: formatCurrency },
+      ],
+      s.per_mese
+    );
+
+    // Top pratiche
+    document.getElementById('stats-top-pratiche').innerHTML = buildTable(
+      [
+        { label: 'Defunto', key: 'nome' },
+        { label: 'Composizioni', key: 'num_composizioni', align: 'right' },
+        { label: 'Totale', key: 'totale', align: 'right', format: formatCurrency },
+      ],
+      s.top_pratiche
+    );
+
+  } catch (err) {
+    showToast('Errore caricamento statistiche: ' + err.message, 'error');
+  }
+}
+
+// -------------------------------------------------------
 // EVENT LISTENERS
 // -------------------------------------------------------
 
@@ -730,16 +869,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Back button ---
   document.getElementById('btn-back').addEventListener('click', () => {
-    showView('lista');
-    loadDefunti();
+    if (state.view === 'statistiche') {
+      showView('lista');
+    } else if (state.view === 'dettaglio') {
+      showView('lista');
+      loadDefunti();
+    } else if (state.mostraArchiviati) {
+      state.mostraArchiviati = false;
+      showView('lista');
+      loadDefunti();
+    }
+  });
+
+  // --- Statistiche ---
+  document.getElementById('btn-show-stats').addEventListener('click', () => {
+    showView('statistiche');
+    loadStatistiche('');
+  });
+  document.getElementById('stats-anno').addEventListener('change', (e) => {
+    loadStatistiche(e.target.value);
   });
 
   // --- Mostra archiviati ---
   const btnArchived = document.getElementById('btn-show-archived');
   btnArchived.addEventListener('click', () => {
-    state.mostraArchiviati = !state.mostraArchiviati;
-    btnArchived.setAttribute('aria-pressed', String(state.mostraArchiviati));
-    btnArchived.textContent = state.mostraArchiviati ? 'Attivi' : 'Archivio';
+    state.mostraArchiviati = true;
+    showView('lista');
     loadDefunti();
   });
 

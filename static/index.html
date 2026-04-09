@@ -20,6 +20,9 @@
       <span class="navbar-brand" id="navbar-title">Lista defunti</span>
     </div>
     <div class="navbar-right">
+      <button id="btn-show-stats" class="btn btn-ghost btn-sm navbar-stats-btn">
+        Statistiche
+      </button>
       <button id="btn-show-archived" class="btn btn-ghost btn-sm navbar-archived-btn" aria-pressed="false">
         Archivio
       </button>
@@ -89,6 +92,109 @@
               <span class="riepilogo-value text-danger" id="riepilogo-da-pagare">€ 0,00</span>
             </div>
           </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- VIEW: STATISTICHE -->
+    <section id="view-statistiche" class="view-section" hidden aria-label="Statistiche">
+
+      <!-- Filtro anno -->
+      <div class="stats-year-filter">
+        <label class="form-label" for="stats-anno">Anno</label>
+        <select id="stats-anno" class="form-control form-select stats-year-select"></select>
+      </div>
+
+      <!-- Panoramica generale -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Panoramica</h3>
+          <div class="stats-grid stats-grid--4">
+            <div class="stats-item">
+              <span class="stats-label">Pratiche totali</span>
+              <span class="stats-value" id="stats-pratiche-totali">0</span>
+            </div>
+            <div class="stats-item">
+              <span class="stats-label">Pratiche attive</span>
+              <span class="stats-value" id="stats-pratiche-attive">0</span>
+            </div>
+            <div class="stats-item">
+              <span class="stats-label">Pratiche archiviate</span>
+              <span class="stats-value" id="stats-pratiche-archiviate">0</span>
+            </div>
+            <div class="stats-item">
+              <span class="stats-label">Composizioni totali</span>
+              <span class="stats-value" id="stats-composizioni-totali">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Economico -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Riepilogo economico</h3>
+          <div class="stats-grid stats-grid--3">
+            <div class="stats-item">
+              <span class="stats-label">Fatturato totale</span>
+              <span class="stats-value stats-value--lg" id="stats-fatturato">€ 0,00</span>
+            </div>
+            <div class="stats-item stats-item--success">
+              <span class="stats-label">Incassato</span>
+              <span class="stats-value stats-value--lg" id="stats-incassato">€ 0,00</span>
+            </div>
+            <div class="stats-item stats-item--danger">
+              <span class="stats-label">Da incassare</span>
+              <span class="stats-value stats-value--lg" id="stats-da-incassare">€ 0,00</span>
+            </div>
+          </div>
+          <div class="stats-grid stats-grid--3 stats-grid--mt">
+            <div class="stats-item">
+              <span class="stats-label">Costo medio per pratica</span>
+              <span class="stats-value" id="stats-costo-medio-pratica">€ 0,00</span>
+            </div>
+            <div class="stats-item">
+              <span class="stats-label">Costo medio per composizione</span>
+              <span class="stats-value" id="stats-costo-medio-comp">€ 0,00</span>
+            </div>
+            <div class="stats-item">
+              <span class="stats-label">Composizioni medie per pratica</span>
+              <span class="stats-value" id="stats-comp-media-pratica">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Per tipo composizione -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Per tipo di composizione</h3>
+          <div id="stats-per-tipo" class="stats-table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- Per metodo pagamento -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Per metodo di pagamento</h3>
+          <div id="stats-per-metodo" class="stats-table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- Per mese -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Andamento mensile</h3>
+          <div id="stats-per-mese" class="stats-table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- Top pratiche -->
+      <div class="card stats-card">
+        <div class="card-body">
+          <h3 class="stats-section-title">Pratiche con importo maggiore</h3>
+          <div id="stats-top-pratiche" class="stats-table-wrapper"></div>
         </div>
       </div>
 
