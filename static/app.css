@@ -250,8 +250,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border-radius: var(--radius-md);
   border: none;
@@ -260,7 +260,18 @@
 }
 
 .btn-icon-sm svg {
+  width: 16px;
+  height: 16px;
   pointer-events: none;
+}
+
+/* Delete button: less prominent by default */
+.btn-delete-card {
+  opacity: 0.5;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+.btn-delete-card:hover {
+  opacity: 1;
 }
 
 /* -------------------------------------------------------
@@ -413,12 +424,11 @@
 }
 
 .riepilogo-title {
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: var(--font-size-xs);
   margin-bottom: var(--space-4);
 }
 
@@ -772,4 +782,91 @@ body.modal-open {
   font-size: var(--font-size-sm);
   text-align: center;
   padding: var(--space-4);
+}
+
+/* -------------------------------------------------------
+   DETAIL ACTIONS BAR (Export / Batch select)
+   ------------------------------------------------------- */
+.detail-actions-bar {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.detail-actions-bar .btn svg {
+  vertical-align: -2px;
+  margin-right: var(--space-1);
+}
+
+/* -------------------------------------------------------
+   LOADING STATE
+   ------------------------------------------------------- */
+.app-page.is-loading {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+/* -------------------------------------------------------
+   BATCH SELECTION
+   ------------------------------------------------------- */
+.fiore-item.is-selectable {
+  cursor: pointer;
+  user-select: none;
+}
+.fiore-item.is-selectable:hover {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.fiore-item.is-selected {
+  background-color: var(--color-accent-bg);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.batch-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--color-bg-card);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+}
+.batch-bar[hidden] {
+  display: none !important;
+}
+.batch-bar__count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.batch-bar__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* -------------------------------------------------------
+   STATS TABLE SCOPE (accessibility)
+   ------------------------------------------------------- */
+.stats-table th[scope] {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* -------------------------------------------------------
+   ORDINANTE DISPLAY
+   ------------------------------------------------------- */
+.fiore-item__ordinante {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.fiore-item__ordinante svg {
+  flex-shrink: 0;
 }

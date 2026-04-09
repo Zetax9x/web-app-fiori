@@ -58,6 +58,18 @@
     <!-- VIEW: COMPOSIZIONI DEFUNTO -->
     <section id="view-dettaglio" class="view-section" hidden aria-label="Composizioni defunto">
 
+      <!-- Azioni dettaglio -->
+      <div class="detail-actions-bar">
+        <button id="btn-export" class="btn btn-ghost btn-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Esporta
+        </button>
+        <button id="btn-batch-select" class="btn btn-ghost btn-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          Segna pagati
+        </button>
+      </div>
+
       <!-- Filtro fiori -->
       <div class="filter-tabs" role="group" aria-label="Filtra composizioni">
         <button class="filter-tab active" data-filter="tutti" aria-pressed="true">Tutti</button>
@@ -284,6 +296,14 @@
             <label class="form-label" for="fiore-scritta-fascia">Scritta fascia</label>
             <input type="text" id="fiore-scritta-fascia" class="form-control" placeholder="Es. Con affetto, la famiglia" />
           </div>
+          <div class="form-group">
+            <label class="form-label" for="fiore-ordinante-nome">Ordinante</label>
+            <input type="text" id="fiore-ordinante-nome" class="form-control" placeholder="Nome di chi ordina" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fiore-ordinante-telefono">Telefono ordinante</label>
+            <input type="tel" id="fiore-ordinante-telefono" class="form-control" placeholder="Es. 333 1234567" />
+          </div>
           <div class="form-group" id="group-costo">
             <label class="form-label" for="fiore-costo">Costo (EUR) <span class="required" aria-hidden="true">*</span></label>
             <div class="input-group input-currency">
@@ -329,6 +349,15 @@
         <button type="button" class="btn btn-ghost" id="modal-confirm-cancel">Annulla</button>
         <button type="button" class="btn btn-danger" id="modal-confirm-ok">Conferma</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ===== BATCH BAR ===== -->
+  <div id="batch-bar" class="batch-bar" hidden>
+    <span class="batch-bar__count" id="batch-count">0 selezionati</span>
+    <div class="batch-bar__actions">
+      <button id="btn-batch-cancel" class="btn btn-ghost btn-sm">Annulla</button>
+      <button id="btn-batch-confirm" class="btn btn-primary btn-sm">Segna come pagati</button>
     </div>
   </div>
 

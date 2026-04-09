@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-from database import get_db
+from database import get_db, put_db
 import psycopg2.extras
 
 api = Blueprint('api', __name__)
@@ -13,23 +13,67 @@ def now_iso():
 
 
 def query(sql, params=(), fetchone=False, fetchall=False, returning=False):
+    """Esegui una singola query con gestione sicura della connessione."""
     conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute(sql, params)
-    result = None
-    if fetchone or returning:
-        result = cursor.fetchone()
-    elif fetchall:
-        result = cursor.fetchall()
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(sql, params)
+        result = None
+        if fetchone or returning:
+            result = cursor.fetchone()
+        elif fetchall:
+            result = cursor.fetchall()
+        conn.commit()
+        cursor.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_db(conn)
     if result is None:
         return None
     # Convert RealDictRow to plain dict
     if isinstance(result, list):
         return [dict(r) for r in result]
     return dict(result)
+
+
+def query_transactional(statements):
+    """Esegui piu' statement nella stessa transazione.
+    statements: lista di tuple (sql, params)
+    Ritorna None. Usato per operazioni batch/transazionali.
+    """
+    conn = get_db()
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        for sql, params in statements:
+            cursor.execute(sql, params)
+        conn.commit()
+        cursor.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_db(conn)
+
+
+def _parse_float(value, default=0.0, field_name='valore'):
+    """Converte in float con validazione."""
+    try:
+        result = float(value if value is not None else default)
+    except (ValueError, TypeError):
+        raise ValueError(f'{field_name} deve essere un numero valido')
+    if result < 0:
+        raise ValueError(f'{field_name} non puo\' essere negativo')
+    return result
+
+
+def _parse_int(value, default=0, field_name='valore'):
+    """Converte in int con validazione."""
+    try:
+        return int(value if value is not None else default)
+    except (ValueError, TypeError):
+        raise ValueError(f'{field_name} deve essere un intero valido')
 
 
 # --- Defunti ---
@@ -133,9 +177,26 @@ def delete_defunto(defunto_id):
     defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
         return jsonify({'error': 'Defunto non trovato'}), 404
-    query('DELETE FROM fiori WHERE defunto_id = %s', (defunto_id,))
-    query('DELETE FROM defunti WHERE id = %s', (defunto_id,))
+    # DELETE transazionale: fiori + defunto nella stessa connessione
+    query_transactional([
+        ('DELETE FROM fiori WHERE defunto_id = %s', (defunto_id,)),
+        ('DELETE FROM defunti WHERE id = %s', (defunto_id,)),
+    ])
     return jsonify({'message': 'Defunto e composizioni eliminati'})
+
+
+# --- De-archiviazione ---
+
+@api.route('/api/defunti/<int:defunto_id>/ripristina', methods=['PATCH'])
+def ripristina_defunto(defunto_id):
+    defunto = query('SELECT * FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
+    if not defunto:
+        return jsonify({'error': 'Defunto non trovato'}), 404
+    updated = query(
+        'UPDATE defunti SET archiviato = 0 WHERE id = %s RETURNING *',
+        (defunto_id,), returning=True
+    )
+    return jsonify(updated)
 
 
 # --- Fiori per defunto ---
@@ -161,16 +222,26 @@ def add_fiore(defunto_id):
     if data['tipo'] not in TIPI_VALIDI:
         return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(TIPI_VALIDI))}'}), 400
 
+    # Validazione input numerici
+    try:
+        costo = _parse_float(data.get('costo', 0), field_name='costo')
+        pagato = _parse_int(data.get('pagato', 0), field_name='pagato')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     defunto = query('SELECT id FROM defunti WHERE id = %s', (defunto_id,), fetchone=True)
     if not defunto:
         return jsonify({'error': 'Defunto non trovato'}), 404
 
     row = query(
-        '''INSERT INTO fiori (defunto_id, tipo, descrizione, scritta_fascia, costo, pagato, pagato_da, data_inserimento)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *''',
+        '''INSERT INTO fiori (defunto_id, tipo, descrizione, scritta_fascia, costo, pagato, pagato_da,
+                              ordinante_nome, ordinante_telefono, data_inserimento)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *''',
         (defunto_id, data['tipo'], data.get('descrizione'), data.get('scritta_fascia'),
-         float(data.get('costo', 0)), int(data.get('pagato', 0)),
-         data.get('pagato_da'), now_iso()),
+         costo, pagato,
+         data.get('pagato_da'),
+         data.get('ordinante_nome'), data.get('ordinante_telefono'),
+         now_iso()),
         returning=True
     )
     return jsonify(row), 201
@@ -189,16 +260,25 @@ def update_fiore(fiore_id):
     if tipo not in TIPI_VALIDI:
         return jsonify({'error': f'tipo deve essere uno di: {", ".join(sorted(TIPI_VALIDI))}'}), 400
 
+    # Validazione input numerici
+    try:
+        costo = _parse_float(data.get('costo', fiore['costo']), field_name='costo')
+        pagato = _parse_int(data.get('pagato', fiore['pagato']), field_name='pagato')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     updated = query(
         '''UPDATE fiori
-           SET tipo = %s, descrizione = %s, scritta_fascia = %s, costo = %s, pagato = %s, pagato_da = %s
+           SET tipo = %s, descrizione = %s, scritta_fascia = %s, costo = %s, pagato = %s, pagato_da = %s,
+               ordinante_nome = %s, ordinante_telefono = %s
            WHERE id = %s RETURNING *''',
         (tipo,
          data.get('descrizione', fiore['descrizione']),
          data.get('scritta_fascia', fiore.get('scritta_fascia')),
-         float(data.get('costo', fiore['costo'])),
-         int(data.get('pagato', fiore['pagato'])),
+         costo, pagato,
          data.get('pagato_da', fiore['pagato_da']),
+         data.get('ordinante_nome', fiore.get('ordinante_nome')),
+         data.get('ordinante_telefono', fiore.get('ordinante_telefono')),
          fiore_id),
         returning=True
     )
@@ -212,6 +292,48 @@ def delete_fiore(fiore_id):
         return jsonify({'error': 'Fiore non trovato'}), 404
     query('DELETE FROM fiori WHERE id = %s', (fiore_id,))
     return jsonify({'message': 'Fiore eliminato'})
+
+
+# --- Batch update pagamento ---
+
+@api.route('/api/fiori/batch-pagamento', methods=['PATCH'])
+def batch_update_pagamento():
+    data = request.get_json()
+    if not data or not isinstance(data.get('ids'), list) or len(data['ids']) == 0:
+        return jsonify({'error': 'ids deve essere una lista non vuota'}), 400
+
+    try:
+        pagato = _parse_int(data.get('pagato', 1), field_name='pagato')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    pagato_da = data.get('pagato_da')
+    ids = data['ids']
+
+    # Validazione: tutti gli id devono essere interi
+    try:
+        ids = [int(i) for i in ids]
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Tutti gli id devono essere numeri interi'}), 400
+
+    # Singola transazione per tutti gli update
+    conn = get_db()
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            'UPDATE fiori SET pagato = %s, pagato_da = %s WHERE id = ANY(%s) RETURNING *',
+            (pagato, pagato_da, ids)
+        )
+        updated = cursor.fetchall()
+        conn.commit()
+        cursor.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_db(conn)
+
+    return jsonify([dict(r) for r in updated])
 
 
 # --- Riepilogo ---
@@ -239,126 +361,144 @@ def get_riepilogo(defunto_id):
     })
 
 
-# --- Statistiche ---
+# --- Statistiche (singola connessione per tutte le query) ---
 
 @api.route('/api/statistiche', methods=['GET'])
 def get_statistiche():
     anno = request.args.get('anno', '')
     filtro_anno = ''
-    filtro_anno_fiori = ''
     params_d = ()
     params_f = ()
 
     if anno:
         filtro_anno = " AND d.data_inserimento LIKE %s"
-        filtro_anno_fiori = " AND f.data_inserimento LIKE %s"
         params_d = (f'{anno}%',)
         params_f = (f'{anno}%',)
 
-    # Anni disponibili
-    anni = query(
-        "SELECT DISTINCT SUBSTRING(data_inserimento FROM 1 FOR 4) AS anno FROM defunti WHERE data_inserimento IS NOT NULL ORDER BY anno DESC",
-        fetchall=True
-    ) or []
+    conn = get_db()
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Panoramica pratiche
-    panoramica = query(
-        f'''SELECT
-            COUNT(*) AS totali,
-            SUM(CASE WHEN archiviato = 0 THEN 1 ELSE 0 END) AS attive,
-            SUM(CASE WHEN archiviato = 1 THEN 1 ELSE 0 END) AS archiviate
-        FROM defunti d WHERE 1=1{filtro_anno}''',
-        params_d, fetchone=True
-    )
+        # Anni disponibili
+        cursor.execute(
+            "SELECT DISTINCT SUBSTRING(data_inserimento FROM 1 FOR 4) AS anno FROM defunti WHERE data_inserimento IS NOT NULL ORDER BY anno DESC"
+        )
+        anni = [dict(r) for r in cursor.fetchall()] or []
 
-    # Composizioni totali
-    comp_totali = query(
-        f'''SELECT COUNT(*) AS totali FROM fiori f
+        # Panoramica pratiche
+        cursor.execute(
+            f'''SELECT
+                COUNT(*) AS totali,
+                SUM(CASE WHEN archiviato = 0 THEN 1 ELSE 0 END) AS attive,
+                SUM(CASE WHEN archiviato = 1 THEN 1 ELSE 0 END) AS archiviate
+            FROM defunti d WHERE 1=1{filtro_anno}''',
+            params_d
+        )
+        panoramica = dict(cursor.fetchone())
+
+        # Composizioni totali
+        cursor.execute(
+            f'''SELECT COUNT(*) AS totali FROM fiori f
+                JOIN defunti d ON d.id = f.defunto_id
+                WHERE 1=1{filtro_anno}''',
+            params_d
+        )
+        comp_totali = dict(cursor.fetchone())
+
+        # Riepilogo economico (escludi Copricassa)
+        cursor.execute(
+            f'''SELECT
+                COALESCE(SUM(f.costo), 0) AS fatturato,
+                COALESCE(SUM(CASE WHEN f.pagato = 1 THEN f.costo ELSE 0 END), 0) AS incassato,
+                COALESCE(SUM(CASE WHEN f.pagato = 0 THEN f.costo ELSE 0 END), 0) AS da_incassare,
+                COALESCE(AVG(f.costo), 0) AS costo_medio_comp
+            FROM fiori f
             JOIN defunti d ON d.id = f.defunto_id
-            WHERE 1=1{filtro_anno}''',
-        params_d, fetchone=True
-    )
+            WHERE f.tipo != 'Copricassa'{filtro_anno}''',
+            params_d
+        )
+        economico = dict(cursor.fetchone())
 
-    # Riepilogo economico (escludi Copricassa)
-    economico = query(
-        f'''SELECT
-            COALESCE(SUM(f.costo), 0) AS fatturato,
-            COALESCE(SUM(CASE WHEN f.pagato = 1 THEN f.costo ELSE 0 END), 0) AS incassato,
-            COALESCE(SUM(CASE WHEN f.pagato = 0 THEN f.costo ELSE 0 END), 0) AS da_incassare,
-            COALESCE(AVG(f.costo), 0) AS costo_medio_comp
-        FROM fiori f
-        JOIN defunti d ON d.id = f.defunto_id
-        WHERE f.tipo != 'Copricassa'{filtro_anno}''',
-        params_d, fetchone=True
-    )
+        # Costo medio per pratica e composizioni medie per pratica
+        cursor.execute(
+            f'''SELECT
+                COALESCE(AVG(sub.totale), 0) AS costo_medio_pratica,
+                COALESCE(AVG(sub.num), 0) AS comp_media
+            FROM (
+                SELECT d.id, SUM(f.costo) AS totale, COUNT(f.id) AS num
+                FROM defunti d
+                JOIN fiori f ON f.defunto_id = d.id
+                WHERE f.tipo != 'Copricassa'{filtro_anno}
+                GROUP BY d.id
+            ) sub''',
+            params_d
+        )
+        per_pratica = dict(cursor.fetchone())
 
-    # Costo medio per pratica e composizioni medie per pratica
-    per_pratica = query(
-        f'''SELECT
-            COALESCE(AVG(sub.totale), 0) AS costo_medio_pratica,
-            COALESCE(AVG(sub.num), 0) AS comp_media
-        FROM (
-            SELECT d.id, SUM(f.costo) AS totale, COUNT(f.id) AS num
+        # Per tipo composizione
+        cursor.execute(
+            f'''SELECT f.tipo,
+                COUNT(*) AS quantita,
+                COALESCE(SUM(f.costo), 0) AS totale,
+                COALESCE(AVG(f.costo), 0) AS media
+            FROM fiori f
+            JOIN defunti d ON d.id = f.defunto_id
+            WHERE 1=1{filtro_anno}
+            GROUP BY f.tipo ORDER BY quantita DESC''',
+            params_d
+        )
+        per_tipo = [dict(r) for r in cursor.fetchall()] or []
+
+        # Per metodo pagamento
+        cursor.execute(
+            f'''SELECT
+                COALESCE(f.pagato_da, 'Non specificato') AS metodo,
+                COUNT(*) AS quantita,
+                COALESCE(SUM(f.costo), 0) AS totale
+            FROM fiori f
+            JOIN defunti d ON d.id = f.defunto_id
+            WHERE f.pagato = 1 AND f.tipo != 'Copricassa'{filtro_anno}
+            GROUP BY f.pagato_da ORDER BY totale DESC''',
+            params_d
+        )
+        per_metodo = [dict(r) for r in cursor.fetchall()] or []
+
+        # Andamento mensile
+        cursor.execute(
+            f'''SELECT
+                SUBSTRING(d.data_inserimento FROM 1 FOR 7) AS mese,
+                COUNT(DISTINCT d.id) AS pratiche,
+                COUNT(f.id) AS composizioni,
+                COALESCE(SUM(f.costo), 0) AS totale
             FROM defunti d
-            JOIN fiori f ON f.defunto_id = d.id
-            WHERE f.tipo != 'Copricassa'{filtro_anno}
-            GROUP BY d.id
-        ) sub''',
-        params_d, fetchone=True
-    )
+            LEFT JOIN fiori f ON f.defunto_id = d.id
+            WHERE d.data_inserimento IS NOT NULL{filtro_anno}
+            GROUP BY mese ORDER BY mese DESC''',
+            params_d
+        )
+        per_mese = [dict(r) for r in cursor.fetchall()] or []
 
-    # Per tipo composizione
-    per_tipo = query(
-        f'''SELECT f.tipo,
-            COUNT(*) AS quantita,
-            COALESCE(SUM(f.costo), 0) AS totale,
-            COALESCE(AVG(f.costo), 0) AS media
-        FROM fiori f
-        JOIN defunti d ON d.id = f.defunto_id
-        WHERE 1=1{filtro_anno}
-        GROUP BY f.tipo ORDER BY quantita DESC''',
-        params_d, fetchall=True
-    ) or []
+        # Top 10 pratiche per importo
+        cursor.execute(
+            f'''SELECT d.id, d.nome, d.cognome,
+                COUNT(f.id) AS num_composizioni,
+                COALESCE(SUM(f.costo), 0) AS totale
+            FROM defunti d
+            LEFT JOIN fiori f ON f.defunto_id = d.id
+            WHERE 1=1{filtro_anno}
+            GROUP BY d.id, d.nome, d.cognome
+            ORDER BY totale DESC LIMIT 10''',
+            params_d
+        )
+        top_pratiche = [dict(r) for r in cursor.fetchall()] or []
 
-    # Per metodo pagamento
-    per_metodo = query(
-        f'''SELECT
-            COALESCE(f.pagato_da, 'Non specificato') AS metodo,
-            COUNT(*) AS quantita,
-            COALESCE(SUM(f.costo), 0) AS totale
-        FROM fiori f
-        JOIN defunti d ON d.id = f.defunto_id
-        WHERE f.pagato = 1 AND f.tipo != 'Copricassa'{filtro_anno}
-        GROUP BY f.pagato_da ORDER BY totale DESC''',
-        params_d, fetchall=True
-    ) or []
-
-    # Andamento mensile
-    per_mese = query(
-        f'''SELECT
-            SUBSTRING(d.data_inserimento FROM 1 FOR 7) AS mese,
-            COUNT(DISTINCT d.id) AS pratiche,
-            COUNT(f.id) AS composizioni,
-            COALESCE(SUM(f.costo), 0) AS totale
-        FROM defunti d
-        LEFT JOIN fiori f ON f.defunto_id = d.id
-        WHERE d.data_inserimento IS NOT NULL{filtro_anno}
-        GROUP BY mese ORDER BY mese DESC''',
-        params_d, fetchall=True
-    ) or []
-
-    # Top 10 pratiche per importo
-    top_pratiche = query(
-        f'''SELECT d.id, d.nome, d.cognome,
-            COUNT(f.id) AS num_composizioni,
-            COALESCE(SUM(f.costo), 0) AS totale
-        FROM defunti d
-        LEFT JOIN fiori f ON f.defunto_id = d.id
-        WHERE 1=1{filtro_anno}
-        GROUP BY d.id, d.nome, d.cognome
-        ORDER BY totale DESC LIMIT 10''',
-        params_d, fetchall=True
-    ) or []
+        conn.commit()
+        cursor.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_db(conn)
 
     return jsonify({
         'anni': [a['anno'] for a in anni if a['anno']],

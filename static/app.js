@@ -9,7 +9,7 @@
 // STATO GLOBALE
 // -------------------------------------------------------
 const state = {
-  view: 'lista',          // 'lista' | 'dettaglio'
+  view: 'lista',          // 'lista' | 'dettaglio' | 'statistiche'
   defunti: [],
   defuntoCorrente: null,  // oggetto defunto
   fioriCorrente: [],      // fiori del defunto corrente
@@ -17,6 +17,8 @@ const state = {
   mostraArchiviati: false,
   searchQuery: '',
   riepilogo: null,
+  selezioneFiori: [],       // [10] batch pagamento
+  modalitaSelezione: false, // [10] batch pagamento
 };
 
 // -------------------------------------------------------
@@ -32,7 +34,6 @@ function formatCurrency(value) {
 /** Formatta una data ISO in formato italiano */
 function formatDate(dateStr) {
   if (!dateStr) return '';
-  // Evita problemi di timezone: la data e' solo una data (YYYY-MM-DD)
   const parts = dateStr.split('-');
   if (parts.length === 3) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
@@ -78,14 +79,61 @@ function debounce(fn, delay) {
 }
 
 // -------------------------------------------------------
+// [6] LOADING STATE
+// -------------------------------------------------------
+
+function setLoading(show) {
+  const app = document.getElementById('app');
+  if (show) {
+    app.classList.add('is-loading');
+  } else {
+    app.classList.remove('is-loading');
+  }
+}
+
+// -------------------------------------------------------
 // GESTIONE MODALI
 // -------------------------------------------------------
 
+/** Riferimento all'elemento che aveva focus prima dell'apertura modale [4] */
+let _lastFocused = null;
+
+/** Listener corrente per il focus trap [3] */
+let _focusTrapListener = null;
+
+/** Intrappola il focus all'interno della modale [3] */
+function trapFocus(backdropEl) {
+  const FOCUSABLE = 'input:not([type=hidden]):not([hidden]), select, textarea, button:not([hidden])';
+  _focusTrapListener = function (e) {
+    if (e.key !== 'Tab') return;
+    const focusableEls = Array.from(backdropEl.querySelectorAll(FOCUSABLE)).filter(
+      el => !el.disabled && el.offsetParent !== null
+    );
+    if (focusableEls.length === 0) return;
+    const first = focusableEls[0];
+    const last = focusableEls[focusableEls.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  backdropEl.addEventListener('keydown', _focusTrapListener);
+}
+
 /** Apre un modal (usa classe is-open su backdrop) */
 function openModal(backdropId) {
+  _lastFocused = document.activeElement; // [4] salva focus corrente
   const backdrop = document.getElementById(backdropId);
   backdrop.classList.add('is-open');
   document.body.classList.add('modal-open');
+  trapFocus(backdrop); // [3] attiva focus trap
   // Focus primo campo interattivo
   const focusable = backdrop.querySelector('input:not([type=hidden]), select, textarea, button.btn-primary');
   if (focusable) setTimeout(() => focusable.focus(), 80);
@@ -95,10 +143,20 @@ function openModal(backdropId) {
 function closeModal(backdropId) {
   const backdrop = document.getElementById(backdropId);
   backdrop.classList.remove('is-open');
+  // [3] rimuovi focus trap
+  if (_focusTrapListener) {
+    backdrop.removeEventListener('keydown', _focusTrapListener);
+    _focusTrapListener = null;
+  }
   // Rimuovi modal-open solo se nessun modal e' aperto
   const openModals = document.querySelectorAll('.modal-backdrop.is-open');
   if (openModals.length === 0) {
     document.body.classList.remove('modal-open');
+  }
+  // [4] ripristina focus
+  if (_lastFocused) {
+    _lastFocused.focus();
+    _lastFocused = null;
   }
 }
 
@@ -133,10 +191,18 @@ function showConfirm(message, onConfirm) {
 // -------------------------------------------------------
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
+  let res;
+  try { // [5] network error handling
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error('Connessione di rete assente. Controlla la connessione.');
+    }
+    throw err;
+  }
   if (!res.ok) {
     let errMsg = `Errore ${res.status}`;
     try {
@@ -176,6 +242,11 @@ async function apiDeleteDefunto(id) {
   return apiFetch(`/api/defunti/${id}/elimina`, { method: 'DELETE' });
 }
 
+/** [8] De-archiviazione */
+async function apiRipristinaDefunto(id) {
+  return apiFetch(`/api/defunti/${id}/ripristina`, { method: 'PATCH' });
+}
+
 async function apiCreateFiore(defuntoId, data) {
   return apiFetch(`/api/defunti/${defuntoId}/fiori`, { method: 'POST', body: JSON.stringify(data) });
 }
@@ -190,6 +261,14 @@ async function apiDeleteFiore(fioreId) {
 
 async function apiGetRiepilogo(defuntoId) {
   return apiFetch(`/api/defunti/${defuntoId}/riepilogo`);
+}
+
+/** [10] Batch pagamento */
+async function apiBatchPagamento(ids, pagato, pagato_da) {
+  return apiFetch('/api/fiori/batch-pagamento', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids, pagato: pagato ? 1 : 0, pagato_da: pagato_da || null }),
+  });
 }
 
 // -------------------------------------------------------
@@ -224,12 +303,16 @@ function showView(name) {
     navbarTitle.textContent = 'Statistiche';
     document.querySelector('.search-wrapper').style.display = 'none';
   } else {
+    // dettaglio
     btnBack.hidden = false;
     btnArchived.hidden = true;
     btnStats.hidden = true;
     fab.setAttribute('aria-label', 'Aggiungi composizione');
-    document.querySelector('.search-wrapper').style.display = '';
+    document.querySelector('.search-wrapper').style.display = 'none'; // [7] nascondi search nel dettaglio
   }
+
+  // [12] History API
+  history.pushState({ view: name }, '', '');
 }
 
 // -------------------------------------------------------
@@ -247,10 +330,10 @@ function renderListaDefunti(defunti) {
 
   if (!defunti || defunti.length === 0) {
     if (state.mostraArchiviati) {
-      emptyEl.querySelector('.empty-state-title').textContent = 'Nessun defunto archiviato';
+      emptyEl.querySelector('.empty-state-title').textContent = 'Nessuna pratica archiviata';
       emptyEl.querySelector('.empty-state-sub').textContent = 'Non ci sono pratiche archiviate.';
     } else {
-      emptyEl.querySelector('.empty-state-title').textContent = 'Nessun defunto registrato';
+      emptyEl.querySelector('.empty-state-title').textContent = 'Nessuna pratica registrata';
       emptyEl.querySelector('.empty-state-sub').textContent = 'Clicca il bottone + per iniziare.';
     }
     emptyEl.hidden = false;
@@ -288,19 +371,29 @@ function createDefuntoCard(def) {
     }
   }
 
-  const azioni = def.archiviato ? '' : `
-    <div class="card__actions">
-      <button class="btn btn-ghost btn-icon-sm btn-edit-card" aria-label="Modifica ${def.cognome} ${def.nome}">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-      </button>
-      <button class="btn btn-danger-ghost btn-icon-sm btn-archive-card" aria-label="Archivia ${def.cognome} ${def.nome}">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-      </button>
-      <button class="btn btn-danger-ghost btn-icon-sm btn-delete-card" aria-label="Elimina ${def.cognome} ${def.nome}">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-      </button>
-    </div>
-  `;
+  // [8] Se archiviato, mostra bottone Ripristina; altrimenti edit/archivia/elimina
+  let azioni = '';
+  if (def.archiviato) {
+    azioni = `
+      <div class="card__actions">
+        <button class="btn btn-ghost btn-sm btn-ripristina-card" aria-label="Ripristina ${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}">Ripristina</button>
+      </div>
+    `;
+  } else {
+    azioni = `
+      <div class="card__actions">
+        <button class="btn btn-ghost btn-icon-sm btn-edit-card" aria-label="Modifica ${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="btn btn-danger-ghost btn-icon-sm btn-archive-card" aria-label="Archivia ${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        </button>
+        <button class="btn btn-danger-ghost btn-icon-sm btn-delete-card" aria-label="Elimina ${escapeHtml(def.cognome)} ${escapeHtml(def.nome)}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
+      </div>
+    `;
+  }
 
   card.innerHTML = `
     <div class="card__header">
@@ -330,8 +423,17 @@ function createDefuntoCard(def) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToDettaglio(def.id); }
   });
 
-  // Bottoni edit/archivia/elimina
-  if (!def.archiviato) {
+  // Bottoni edit/archivia/elimina oppure ripristina
+  if (def.archiviato) {
+    // [8] Bottone ripristina per le card archiviate
+    const btnRipristina = card.querySelector('.btn-ripristina-card');
+    if (btnRipristina) {
+      btnRipristina.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ripristinaDefuntoById(def.id, `${def.cognome} ${def.nome}`);
+      });
+    }
+  } else {
     card.querySelector('.btn-edit-card').addEventListener('click', (e) => {
       e.stopPropagation();
       openModalDefunto(def);
@@ -354,11 +456,15 @@ function createDefuntoCard(def) {
 // -------------------------------------------------------
 
 async function goToDettaglio(defuntoId) {
+  setLoading(true); // [6]
   try {
     const defunto = await apiGetDefunto(defuntoId);
     state.defuntoCorrente = defunto;
     state.fioriCorrente = defunto.fiori || [];
     state.filtroFiori = 'tutti';
+    // [10] Resetta selezione batch
+    state.selezioneFiori = [];
+    state.modalitaSelezione = false;
 
     const isArchiviato = !!defunto.archiviato;
     document.getElementById('fab').hidden = isArchiviato;
@@ -376,6 +482,8 @@ async function goToDettaglio(defuntoId) {
     await aggiornareRiepilogo();
   } catch (err) {
     showToast('Errore nel caricamento: ' + err.message, 'error');
+  } finally {
+    setLoading(false); // [6]
   }
 }
 
@@ -407,6 +515,9 @@ function renderFiori() {
 
   const isArchiviato = state.defuntoCorrente && state.defuntoCorrente.archiviato;
   fiori.forEach(fiore => container.appendChild(createFioreEl(fiore, isArchiviato)));
+
+  // [10] Aggiorna UI batch se in modalita' selezione
+  aggiornaUIBatchSelezione();
 }
 
 function createFioreEl(fiore, isArchiviato) {
@@ -439,12 +550,22 @@ function createFioreEl(fiore, isArchiviato) {
     ? `<span class="fiore-item__fascia text-muted">"${escapeHtml(fiore.scritta_fascia)}"</span>`
     : '';
 
+  // [9] Mostra ordinante sotto la scritta fascia se presente
+  const ordinanteHtml = fiore.ordinante_nome
+    ? `<span class="fiore-item__ordinante text-muted" style="font-size:var(--font-size-xs)">Ordinante: ${escapeHtml(fiore.ordinante_nome)}${fiore.ordinante_telefono ? ' - ' + escapeHtml(fiore.ordinante_telefono) : ''}</span>`
+    : '';
+
+  // [10] Checkbox per selezione batch (nascosta di default, mostrata in modalita' selezione)
+  const checkboxHtml = `<label class="fiore-item__select-label" style="display:none"><input type="checkbox" class="fiore-item__select-cb" data-fiore-id="${fiore.id}" /> Seleziona</label>`;
+
   article.innerHTML = `
     <div class="fiore-item__top">
       <div class="fiore-item__info">
+        ${checkboxHtml}
         <span class="badge badge--tipo">${escapeHtml(fiore.tipo)}</span>
         ${fiore.descrizione ? `<span class="fiore-item__desc">${escapeHtml(fiore.descrizione)}</span>` : ''}
         ${scrittaFascia}
+        ${ordinanteHtml}
       </div>
       ${isCopricassa ? '' : `<span class="fiore-item__costo">${formatCurrency(fiore.costo)}</span>`}
     </div>
@@ -457,8 +578,23 @@ function createFioreEl(fiore, isArchiviato) {
   `;
 
   if (!isArchiviato) {
-    article.querySelector('.btn-edit-fiore').addEventListener('click', () => openModalFiore(fiore));
-    article.querySelector('.btn-delete-fiore').addEventListener('click', () => deleteFiore(fiore.id));
+    const editBtn = article.querySelector('.btn-edit-fiore');
+    const deleteBtn = article.querySelector('.btn-delete-fiore');
+    if (editBtn) editBtn.addEventListener('click', () => openModalFiore(fiore));
+    if (deleteBtn) deleteBtn.addEventListener('click', () => deleteFiore(fiore.id));
+  }
+
+  // [10] Listener checkbox batch
+  const cb = article.querySelector('.fiore-item__select-cb');
+  if (cb) {
+    cb.addEventListener('change', () => {
+      const fid = parseInt(cb.dataset.fioreId, 10);
+      if (cb.checked) {
+        if (!state.selezioneFiori.includes(fid)) state.selezioneFiori.push(fid);
+      } else {
+        state.selezioneFiori = state.selezioneFiori.filter(x => x !== fid);
+      }
+    });
   }
 
   return article;
@@ -484,14 +620,15 @@ async function aggiornareRiepilogo() {
 // -------------------------------------------------------
 
 async function loadDefunti() {
+  setLoading(true); // [6]
   try {
     const defunti = await apiGetDefunti(state.searchQuery, state.mostraArchiviati);
-    // Calcola totale_costi e num_fiori dalla lista (il backend li restituisce senza join)
-    // Li recuperiamo dal dettaglio solo se presenti, altrimenti mostriamo solo il nome
     state.defunti = defunti;
     renderListaDefunti(defunti);
   } catch (err) {
     showToast('Errore nel caricamento: ' + err.message, 'error');
+  } finally {
+    setLoading(false); // [6]
   }
 }
 
@@ -508,7 +645,7 @@ function openModalDefunto(defunto = null) {
   errEl.hidden = true;
 
   if (defunto) {
-    title.textContent = 'Modifica Defunto';
+    title.textContent = 'Modifica Pratica'; // [13] terminologia
     document.getElementById('defunto-id').value = defunto.id;
     document.getElementById('defunto-nome').value = defunto.nome || '';
     document.getElementById('defunto-cognome').value = defunto.cognome || '';
@@ -516,7 +653,7 @@ function openModalDefunto(defunto = null) {
     document.getElementById('defunto-luogo').value = defunto.luogo || '';
     document.getElementById('defunto-note').value = defunto.note || '';
   } else {
-    title.textContent = 'Nuovo Defunto';
+    title.textContent = 'Nuova Pratica'; // [13] terminologia
     document.getElementById('defunto-id').value = '';
   }
 
@@ -552,14 +689,14 @@ async function submitFormDefunto(e) {
   try {
     if (id) {
       await apiUpdateDefunto(id, payload);
-      showToast('Defunto aggiornato.');
+      showToast('Pratica aggiornata.'); // [13]
       closeModal('modal-defunto-backdrop');
     } else {
       await apiCreateDefunto(payload);
-      showToast('Defunto aggiunto con successo.');
+      showToast('Pratica aggiunta con successo.'); // [13]
       closeModal('modal-defunto-backdrop');
     }
-    loadDefunti();
+    await loadDefunti(); // [2] await
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
@@ -582,6 +719,10 @@ function openModalFiore(fiore = null) {
   setPagatoDaVisibility(false);
   setCopricassaMode(false);
 
+  // [9] Prova a popolare i campi ordinante (se esistono nel DOM)
+  const ordinanteNomeEl = document.getElementById('fiore-ordinante-nome');
+  const ordinanteTelEl = document.getElementById('fiore-ordinante-telefono');
+
   if (fiore) {
     title.textContent = 'Modifica Composizione';
     document.getElementById('fiore-id').value = fiore.id;
@@ -594,9 +735,15 @@ function openModalFiore(fiore = null) {
     document.getElementById('fiore-pagato-da').value = fiore.pagato_da || '';
     setPagatoDaVisibility(pagato);
     setCopricassaMode(fiore.tipo === 'Copricassa');
+    // [9] Popola campi ordinante
+    if (ordinanteNomeEl) ordinanteNomeEl.value = fiore.ordinante_nome || '';
+    if (ordinanteTelEl) ordinanteTelEl.value = fiore.ordinante_telefono || '';
   } else {
     title.textContent = 'Aggiungi Composizione';
     document.getElementById('fiore-id').value = '';
+    // [9] Reset campi ordinante
+    if (ordinanteNomeEl) ordinanteNomeEl.value = '';
+    if (ordinanteTelEl) ordinanteTelEl.value = '';
   }
 
   openModal('modal-fiore-backdrop');
@@ -646,6 +793,10 @@ async function submitFormFiore(e) {
     pagato = document.getElementById('fiore-pagato').checked;
   }
 
+  // [9] Leggi campi ordinante se presenti
+  const ordinanteNomeEl = document.getElementById('fiore-ordinante-nome');
+  const ordinanteTelEl = document.getElementById('fiore-ordinante-telefono');
+
   const payload = {
     tipo,
     descrizione: document.getElementById('fiore-descrizione').value.trim() || null,
@@ -653,6 +804,8 @@ async function submitFormFiore(e) {
     costo,
     pagato: pagato ? 1 : 0,
     pagato_da: pagato ? (document.getElementById('fiore-pagato-da').value.trim() || null) : null,
+    ordinante_nome: ordinanteNomeEl ? (ordinanteNomeEl.value.trim() || null) : null,         // [9]
+    ordinante_telefono: ordinanteTelEl ? (ordinanteTelEl.value.trim() || null) : null,        // [9]
   };
 
   const submitBtn = document.getElementById('modal-fiore-submit');
@@ -670,8 +823,8 @@ async function submitFormFiore(e) {
     }
     closeModal('modal-fiore-backdrop');
     renderFiori();
-    aggiornareRiepilogo();
-    loadDefunti();
+    await aggiornareRiepilogo(); // [2] await
+    await loadDefunti();         // [2] await
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
@@ -690,8 +843,8 @@ function deleteFiore(fioreId) {
       await apiDeleteFiore(fioreId);
       state.fioriCorrente = state.fioriCorrente.filter(f => f.id !== fioreId);
       renderFiori();
-      aggiornareRiepilogo();
-      loadDefunti();
+      await aggiornareRiepilogo(); // [2] await
+      await loadDefunti();         // [2] await
       showToast('Composizione eliminata.');
     } catch (err) {
       showToast('Errore: ' + err.message, 'error');
@@ -700,17 +853,33 @@ function deleteFiore(fioreId) {
 }
 
 // -------------------------------------------------------
-// ARCHIVIA DEFUNTO
+// ARCHIVIA / RIPRISTINA / ELIMINA DEFUNTO
 // -------------------------------------------------------
 
 function archiviaDefuntoById(id, nomeCompleto) {
   showConfirm(
-    `Archiviare la pratica di ${nomeCompleto}? La scheda diventera' di sola lettura.`,
+    `Archiviare la pratica di ${nomeCompleto}? La pratica diventera' di sola lettura.`, // [13]
     async () => {
       try {
         await apiArchiveDefunto(id);
-        loadDefunti();
-        showToast('Pratica archiviata.');
+        await loadDefunti(); // [2] await
+        showToast('Pratica archiviata.'); // [13]
+      } catch (err) {
+        showToast('Errore: ' + err.message, 'error');
+      }
+    }
+  );
+}
+
+/** [8] Ripristina un defunto archiviato */
+function ripristinaDefuntoById(id, nomeCompleto) {
+  showConfirm(
+    `Ripristinare la pratica di ${nomeCompleto}?`,
+    async () => {
+      try {
+        await apiRipristinaDefunto(id);
+        await loadDefunti(); // [2] await
+        showToast('Pratica ripristinata.'); // [13]
       } catch (err) {
         showToast('Errore: ' + err.message, 'error');
       }
@@ -720,17 +889,139 @@ function archiviaDefuntoById(id, nomeCompleto) {
 
 function eliminaDefuntoById(id, nomeCompleto) {
   showConfirm(
-    `Eliminare definitivamente ${nomeCompleto} e tutte le composizioni associate? L'operazione non e' reversibile.`,
+    `Eliminare definitivamente la pratica di ${nomeCompleto} e tutte le composizioni associate? L'operazione non e' reversibile.`, // [13]
     async () => {
       try {
         await apiDeleteDefunto(id);
-        loadDefunti();
-        showToast('Defunto e composizioni eliminati.');
+        await loadDefunti(); // [2] await
+        showToast('Pratica eliminata.'); // [13]
       } catch (err) {
         showToast('Errore: ' + err.message, 'error');
       }
     }
   );
+}
+
+// -------------------------------------------------------
+// [10] BATCH PAGAMENTO
+// -------------------------------------------------------
+
+function toggleModalitaSelezione() {
+  state.modalitaSelezione = !state.modalitaSelezione;
+  state.selezioneFiori = [];
+  aggiornaUIBatchSelezione();
+}
+
+function aggiornaUIBatchSelezione() {
+  // Mostra/nascondi checkbox sui fiori
+  document.querySelectorAll('.fiore-item__select-label').forEach(label => {
+    label.style.display = state.modalitaSelezione ? '' : 'none';
+  });
+  // Deseleziona tutto quando si esce
+  if (!state.modalitaSelezione) {
+    document.querySelectorAll('.fiore-item__select-cb').forEach(cb => { cb.checked = false; });
+    state.selezioneFiori = [];
+  }
+  // Mostra/nascondi bottone "Segna pagati" fisso in basso
+  let batchBar = document.getElementById('batch-bar');
+  if (state.modalitaSelezione) {
+    if (!batchBar) {
+      batchBar = document.createElement('div');
+      batchBar.id = 'batch-bar';
+      batchBar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--color-bg-card);border-top:2px solid var(--color-accent);padding:var(--space-3) var(--space-4);display:flex;align-items:center;justify-content:center;gap:var(--space-3);z-index:400;box-shadow:var(--shadow-lg);';
+      batchBar.innerHTML = `
+        <select id="batch-pagato-da" class="form-control form-select" style="max-width:160px">
+          <option value="">Metodo...</option>
+          <option value="Bonifico">Bonifico</option>
+          <option value="Contanti">Contanti</option>
+          <option value="Assegno">Assegno</option>
+        </select>
+        <button id="batch-paga-btn" class="btn btn-primary btn-sm">Segna pagati</button>
+        <button id="batch-cancel-btn" class="btn btn-ghost btn-sm">Annulla</button>
+      `;
+      document.body.appendChild(batchBar);
+      document.getElementById('batch-paga-btn').addEventListener('click', eseguiBatchPagamento);
+      document.getElementById('batch-cancel-btn').addEventListener('click', () => {
+        toggleModalitaSelezione();
+      });
+    }
+    batchBar.style.display = 'flex';
+  } else {
+    if (batchBar) batchBar.style.display = 'none';
+  }
+
+  // Aggiorna bottone toggle
+  const btnBatch = document.getElementById('btn-batch-select');
+  if (btnBatch) {
+    btnBatch.textContent = state.modalitaSelezione ? 'Annulla selezione' : 'Selezione multipla';
+  }
+}
+
+async function eseguiBatchPagamento() {
+  if (state.selezioneFiori.length === 0) {
+    showToast('Seleziona almeno una composizione.', 'error');
+    return;
+  }
+  const pagatoDaEl = document.getElementById('batch-pagato-da');
+  const pagatoDa = pagatoDaEl ? pagatoDaEl.value : null;
+
+  try {
+    await apiBatchPagamento(state.selezioneFiori, true, pagatoDa);
+    showToast(`${state.selezioneFiori.length} composizioni segnate come pagate.`);
+    // Ricarica dettaglio
+    state.modalitaSelezione = false;
+    state.selezioneFiori = [];
+    if (state.defuntoCorrente) {
+      await goToDettaglio(state.defuntoCorrente.id);
+    }
+  } catch (err) {
+    showToast('Errore: ' + err.message, 'error');
+  }
+}
+
+// -------------------------------------------------------
+// [11] EXPORT / STAMPA RIEPILOGO
+// -------------------------------------------------------
+
+function esportaRiepilogo() {
+  if (!state.defuntoCorrente) return;
+  const def = state.defuntoCorrente;
+  const fiori = state.fioriCorrente || [];
+  const riepilogo = state.riepilogo || {};
+
+  let csv = 'Riepilogo Pratica\n';
+  csv += `Nome defunto:,${def.cognome} ${def.nome}\n`;
+  if (def.data_decesso) csv += `Data decesso:,${formatDate(def.data_decesso)}\n`;
+  if (def.luogo) csv += `Luogo:,${def.luogo}\n`;
+  csv += '\n';
+
+  csv += 'Tipo,Descrizione,Scritta Fascia,Ordinante,Telefono Ordinante,Costo,Stato,Metodo Pagamento\n';
+  fiori.forEach(f => {
+    const stato = f.tipo === 'Copricassa' ? 'Incluso' : (f.pagato ? 'Pagato' : 'Non pagato');
+    const metodo = f.pagato && f.pagato_da ? f.pagato_da : '';
+    const costoStr = f.tipo === 'Copricassa' ? '0' : (f.costo || 0);
+    const desc = (f.descrizione || '').replace(/,/g, ';');
+    const fascia = (f.scritta_fascia || '').replace(/,/g, ';');
+    const ordNome = (f.ordinante_nome || '').replace(/,/g, ';');
+    const ordTel = (f.ordinante_telefono || '').replace(/,/g, ';');
+    csv += `${f.tipo},${desc},${fascia},${ordNome},${ordTel},${costoStr},${stato},${metodo}\n`;
+  });
+
+  csv += '\n';
+  csv += `Totale:,${riepilogo.totale_costi || 0}\n`;
+  csv += `Pagato:,${riepilogo.totale_pagato || 0}\n`;
+  csv += `Da pagare:,${riepilogo.totale_da_pagare || 0}\n`;
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `riepilogo_${def.cognome}_${def.nome}.csv`.replace(/\s+/g, '_');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Riepilogo esportato.');
 }
 
 // -------------------------------------------------------
@@ -755,17 +1046,18 @@ async function apiGetStatistiche(anno) {
   return apiFetch(`/api/statistiche${params}`);
 }
 
+/** [1] XSS fix: escape valori raw, lascia formattati quelli con format custom */
 function buildTable(headers, rows) {
   if (!rows || rows.length === 0) {
     return '<p class="text-muted stats-no-data">Nessun dato disponibile</p>';
   }
   let html = '<table class="stats-table"><thead><tr>';
-  headers.forEach(h => { html += `<th>${h.label}</th>`; });
+  headers.forEach(h => { html += `<th>${escapeHtml(h.label)}</th>`; });
   html += '</tr></thead><tbody>';
   rows.forEach(row => {
     html += '<tr>';
     headers.forEach(h => {
-      const val = h.format ? h.format(row[h.key]) : row[h.key];
+      const val = h.format ? h.format(row[h.key]) : escapeHtml(String(row[h.key] ?? '')); // [1] XSS fix
       const cls = h.align === 'right' ? ' class="text-right"' : '';
       html += `<td${cls}>${val}</td>`;
     });
@@ -776,6 +1068,7 @@ function buildTable(headers, rows) {
 }
 
 async function loadStatistiche(anno) {
+  setLoading(true); // [6]
   try {
     const s = await apiGetStatistiche(anno);
 
@@ -849,6 +1142,8 @@ async function loadStatistiche(anno) {
 
   } catch (err) {
     showToast('Errore caricamento statistiche: ' + err.message, 'error');
+  } finally {
+    setLoading(false); // [6]
   }
 }
 
@@ -872,6 +1167,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.view === 'statistiche') {
       showView('lista');
     } else if (state.view === 'dettaglio') {
+      // [10] Disattiva selezione batch se attiva
+      if (state.modalitaSelezione) {
+        toggleModalitaSelezione();
+      }
       showView('lista');
       loadDefunti();
     } else if (state.mostraArchiviati) {
@@ -951,6 +1250,41 @@ document.addEventListener('DOMContentLoaded', () => {
       const openBackdrops = document.querySelectorAll('.modal-backdrop.is-open');
       if (openBackdrops.length > 0) {
         closeModal(openBackdrops[openBackdrops.length - 1].id);
+      }
+    }
+  });
+
+  // --- [10] Bottone batch select (se esiste nel DOM, aggiunto da altro agente) ---
+  const btnBatchSelect = document.getElementById('btn-batch-select');
+  if (btnBatchSelect) {
+    btnBatchSelect.addEventListener('click', toggleModalitaSelezione);
+  }
+
+  // --- [11] Bottone export (se esiste nel DOM, aggiunto da altro agente) ---
+  const btnExport = document.getElementById('btn-export');
+  if (btnExport) {
+    btnExport.addEventListener('click', esportaRiepilogo);
+  }
+
+  // --- [12] History API: popstate ---
+  window.addEventListener('popstate', (e) => {
+    if (e.state && e.state.view) {
+      if (e.state.view === 'dettaglio' && state.view !== 'lista') {
+        // Se torniamo indietro da dettaglio, vai a lista
+        showView('lista');
+        loadDefunti();
+      } else if (e.state.view === 'lista') {
+        if (state.view === 'dettaglio' || state.view === 'statistiche') {
+          showView('lista');
+          loadDefunti();
+        }
+      }
+    } else {
+      // Se non c'e' stato, torna alla lista
+      if (state.view !== 'lista') {
+        state.mostraArchiviati = false;
+        showView('lista');
+        loadDefunti();
       }
     }
   });
